@@ -1,0 +1,150 @@
+{
+  "@@locale": "en",
+  "appTitle": "ReadMe.ai",
+  "@appTitle": {
+    "description": "The application name shown in the title bar and app switcher."
+  },
+  "loginTitle": "ReadMe.ai",
+  "@loginTitle": {
+    "description": "Title shown on the login screen."
+  },
+  "loginSubtitle": "Understand books, don't just read them.",
+  "@loginSubtitle": {
+    "description": "Tagline shown beneath the title on the login screen."
+  },
+  "signInWithGoogle": "Sign in with Google",
+  "@signInWithGoogle": {
+    "description": "Label for the Google sign-in button."
+  },
+  "signInError": "Sign-in failed. Please try again.",
+  "@signInError": {
+    "description": "Generic fallback message shown when sign-in fails."
+  },
+  "signOut": "Sign out",
+  "@signOut": {
+    "description": "Tooltip/label for the sign-out action."
+  },
+  "libraryTitle": "My Library",
+  "@libraryTitle": {
+    "description": "Title of the library screen."
+  },
+  "libraryEmptyTitle": "Your library is empty",
+  "@libraryEmptyTitle": {
+    "description": "Headline shown when the user has no books."
+  },
+  "libraryEmptyMessage": "Upload a book to get started.",
+  "@libraryEmptyMessage": {
+    "description": "Body text shown when the user has no books."
+  },
+  "libraryLoadError": "Couldn't load your library.",
+  "@libraryLoadError": {
+    "description": "Shown when fetching the library fails."
+  },
+  "uploadBook": "Upload book",
+  "@uploadBook": {
+    "description": "Label for the upload action."
+  },
+  "uploadFailed": "Upload failed. Please try again.",
+  "@uploadFailed": {
+    "description": "Shown when a book upload fails."
+  },
+  "retry": "Retry",
+  "@retry": {
+    "description": "Label for retry actions."
+  },
+  "bookDetailTitle": "Book details",
+  "@bookDetailTitle": {
+    "description": "Title of the book detail screen."
+  },
+  "deleteBook": "Delete book",
+  "@deleteBook": {
+    "description": "Label/tooltip for deleting a book."
+  },
+  "deleteBookConfirmation": "Delete \"{title}\"? This cannot be undone.",
+  "@deleteBookConfirmation": {
+    "description": "Confirmation message before deleting a book.",
+    "placeholders": {
+      "title": { "type": "String" }
+    }
+  },
+  "deleteFailed": "Couldn't delete the book. Please try again.",
+  "@deleteFailed": {
+    "description": "Shown when deleting a book fails."
+  },
+  "cancel": "Cancel",
+  "@cancel": {
+    "description": "Generic cancel label."
+  },
+  "delete": "Delete",
+  "@delete": {
+    "description": "Generic delete label."
+  },
+  "fieldStatus": "Status",
+  "@fieldStatus": {
+    "description": "Label for the book status field."
+  },
+  "fieldFileSize": "File size",
+  "@fieldFileSize": {
+    "description": "Label for the file size field."
+  },
+  "fieldFileName": "File name",
+  "@fieldFileName": {
+    "description": "Label for the original file name field."
+  },
+  "fieldUploadedAt": "Uploaded",
+  "@fieldUploadedAt": {
+    "description": "Label for the upload date field."
+  },
+  "fieldPages": "Pages",
+  "@fieldPages": {
+    "description": "Label for the page count field."
+  },
+  "readBook": "Read",
+  "@readBook": {
+    "description": "Label for the action that opens the reader."
+  },
+  "bookmarks": "Bookmarks",
+  "@bookmarks": {
+    "description": "Title/label for the bookmarks list."
+  },
+  "bookmarkThisPosition": "Bookmark this position",
+  "@bookmarkThisPosition": {
+    "description": "Tooltip for adding a bookmark at the current position."
+  },
+  "bookmarkAdded": "Bookmark added",
+  "@bookmarkAdded": {
+    "description": "Confirmation shown after adding a bookmark."
+  },
+  "readerSettings": "Reader settings",
+  "@readerSettings": {
+    "description": "Tooltip for opening the reader settings sheet."
+  },
+  "readerUnsupportedFormat": "Preview isn't available for this file format yet.",
+  "@readerUnsupportedFormat": {
+    "description": "Shown when a book's format cannot be rendered yet (e.g. PDF)."
+  },
+  "explanationMeaning": "Meaning",
+  "@explanationMeaning": {
+    "description": "Label for the word's meaning in the explanation sheet."
+  },
+  "explanationExample": "Example",
+  "@explanationExample": {
+    "description": "Label for the contextual example in the explanation sheet."
+  },
+  "explanationError": "Couldn't explain that word. Please try again.",
+  "@explanationError": {
+    "description": "Shown when a word explanation fails to load."
+  },
+  "close": "Close",
+  "@close": {
+    "description": "Generic close label."
+  },
+  "explain": "Explain",
+  "@explain": {
+    "description": "Selection toolbar action that explains the selected text."
+  },
+  "prerequisites": "Prerequisites",
+  "@prerequisites": {
+    "description": "Header for the collapsible list of prerequisite concepts."
+  }
+}

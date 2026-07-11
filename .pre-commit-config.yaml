@@ -1,0 +1,74 @@
+# Pre-commit hooks for the ReadMe.ai monorepo.
+# Install once:   pre-commit install
+# Run on all:     pre-commit run --all-files
+#
+# Python hooks scope themselves to the backend & workers; Dart hooks to mobile.
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  # --- Generic hygiene -----------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^.*\.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # --- Python: import sorting ---------------------------------------------
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: isort (python)
+        files: ^(apps/api|services/workers)/
+        args: ["--profile", "black"]
+
+  # --- Python: formatting --------------------------------------------------
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        files: ^(apps/api|services/workers)/
+
+  # --- Python: lint --------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        files: ^(apps/api|services/workers)/
+        args: ["--fix"]
+
+  # --- Python: static types ------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        files: ^apps/api/
+        additional_dependencies:
+          - pydantic>=2.0
+
+  # --- Dart / Flutter ------------------------------------------------------
+  # Uses the locally installed Flutter SDK to format and analyze.
+  - repo: local
+    hooks:
+      - id: dart-format
+        name: dart format (mobile)
+        entry: dart format --set-exit-if-changed
+        language: system
+        files: ^apps/mobile/.*\.dart$
+        pass_filenames: true
+      - id: flutter-analyze
+        name: flutter analyze (mobile)
+        entry: bash -c 'cd apps/mobile && flutter analyze'
+        language: system
+        files: ^apps/mobile/.*\.dart$
+        pass_filenames: false

@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# ReadMe.ai — root .gitignore
+# Component-specific ignores live in their own directories (e.g. apps/mobile).
+# ---------------------------------------------------------------------------
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+
+# Logs
+*.log
+logs/
+
+# ---------------------------------------------------------------------------
+# Python (apps/api, services/workers)
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
+*.pid
+
+# ---------------------------------------------------------------------------
+# Node / misc tooling (if introduced)
+# ---------------------------------------------------------------------------
+node_modules/

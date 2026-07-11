@@ -1,0 +1,9 @@
+# Configuration for Flutter's gen-l10n localization tooling.
+# ARB files live in lib/l10n; the generated AppLocalizations class is emitted
+# into the same directory as a real (non-synthetic) source file.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+output-dir: lib/l10n/generated
+nullable-getter: false

@@ -1,0 +1,42 @@
+name: readme_ai
+description: "ReadMe.ai — AI reading companion (Flutter client). Engineering foundation."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  cupertino_icons: ^1.0.8
+  # HTTP client.
+  dio: ^5.10.0
+  file_picker: ^11.0.2
+  firebase_auth: ^6.5.4
+  firebase_core: ^4.11.0
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  # State management + dependency injection.
+  flutter_riverpod: ^3.3.2
+  # Immutable models + (de)serialization.
+  freezed_annotation: ^3.1.0
+  # Declarative, URL-based navigation.
+  go_router: ^17.3.0
+  # Localization runtime (pinned by flutter_localizations).
+  google_sign_in: ^7.2.0
+  intl: 0.20.2
+  json_annotation: ^4.12.0
+
+dev_dependencies:
+  build_runner: ^2.15.0
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  freezed: ^3.2.5
+  json_serializable: ^6.14.0
+
+flutter:
+  uses-material-design: true
+  # Generate localization delegates from the ARB files in lib/l10n.
+  generate: true

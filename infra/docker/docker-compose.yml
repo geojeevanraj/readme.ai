@@ -1,0 +1,64 @@
+# ===========================================================================
+# ReadMe.ai — local development stack.
+#
+# Run from the repository root:
+#     docker compose -f infra/docker/docker-compose.yml up --build
+#
+# Services:
+#   api       FastAPI backend (foundation: health/version only)
+#   postgres  System of record
+#   qdrant    Vector database (provisioned now; used in a later sprint)
+# ===========================================================================
+
+name: readme-ai
+
+services:
+  api:
+    build:
+      # Build context is the backend app; its Dockerfile lives alongside it.
+      context: ../../apps/api
+      dockerfile: Dockerfile
+    image: readme-ai/api:dev
+    env_file:
+      - ../../.env
+    environment:
+      # Container-network hostnames override any localhost defaults from .env.
+      POSTGRES_HOST: postgres
+      QDRANT_HOST: qdrant
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-readme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-readme_local_password}
+      POSTGRES_DB: ${POSTGRES_DB:-readme_ai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-readme} -d ${POSTGRES_DB:-readme_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  qdrant_data:
