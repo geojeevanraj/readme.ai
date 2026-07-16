@@ -1,0 +1,55 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:readme_ai/features/explanation/presentation/explanation_sheet.dart';
+import 'package:readme_ai/features/reader/presentation/widgets/explainable_text.dart';
+
+import '../../helpers/fake_explanation_repository.dart';
+import '../../helpers/fake_reader_repository.dart';
+import '../../helpers/pump_reader.dart';
+
+Future<void> _selectAndExplain(WidgetTester tester) async {
+  // Long-press selects the word under the press and shows the selection
+  // toolbar, which includes our "Explain" action.
+  await tester.longPress(find.byType(ExplainableText));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Explain'));
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  testWidgets('selecting text and tapping Explain opens the sheet', (
+    tester,
+  ) async {
+    final explanation = FakeExplanationRepository();
+
+    await pumpReader(
+      tester,
+      repository: FakeReaderRepository(),
+      explanationRepository: explanation,
+    );
+
+    await _selectAndExplain(tester);
+
+    expect(find.byType(ExplanationSheet), findsOneWidget);
+    expect(find.text('a small portable computer'), findsOneWidget);
+    expect(explanation.calls, 1);
+  });
+
+  testWidgets('closing the sheet returns to the reader', (tester) async {
+    await pumpReader(
+      tester,
+      repository: FakeReaderRepository(),
+      explanationRepository: FakeExplanationRepository(),
+    );
+
+    await _selectAndExplain(tester);
+    expect(find.byType(ExplanationSheet), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+
+    // Sheet dismissed; the reader (with its selectable text) is still there.
+    expect(find.byType(ExplanationSheet), findsNothing);
+    expect(find.byType(ExplainableText), findsOneWidget);
+  });
+}
