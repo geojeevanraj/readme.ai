@@ -9,7 +9,7 @@ import '../application/library_controller.dart';
 import '../application/library_providers.dart';
 import '../domain/book.dart';
 
-/// Shows a single book's metadata and offers deletion.
+/// Focused overview of a single book before entering the reader.
 class BookDetailScreen extends ConsumerWidget {
   const BookDetailScreen({required this.bookId, super.key});
 
@@ -25,18 +25,29 @@ class BookDetailScreen extends ConsumerWidget {
         title: Text(l10n.bookDetailTitle),
         actions: [
           if (bookState.hasValue)
-            IconButton(
-              tooltip: l10n.deleteBook,
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () => _confirmDelete(context, ref, bookState.value!),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: IconButton(
+                tooltip: l10n.deleteBook,
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => _confirmDelete(context, ref, bookState.value!),
+              ),
             ),
         ],
       ),
-      body: switch (bookState) {
-        AsyncData(:final value) => _BookDetailView(book: value),
-        AsyncError() => Center(child: Text(l10n.libraryLoadError)),
-        _ => const Center(child: CircularProgressIndicator()),
-      },
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 280),
+        child: switch (bookState) {
+          AsyncData(:final value) => _BookDetailView(
+            key: ValueKey(value.id),
+            book: value,
+          ),
+          AsyncError() => _DetailError(
+            onRetry: () => ref.invalidate(bookProvider(bookId)),
+          ),
+          _ => const Center(child: CircularProgressIndicator()),
+        },
+      ),
     );
   }
 
@@ -52,6 +63,7 @@ class BookDetailScreen extends ConsumerWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.delete_outline_rounded),
         title: Text(l10n.deleteBook),
         content: Text(l10n.deleteBookConfirmation(book.title)),
         actions: [
@@ -61,16 +73,17 @@ class BookDetailScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             child: Text(l10n.delete),
           ),
         ],
       ),
     );
 
-    if (confirmed != true) {
-      return;
-    }
-
+    if (confirmed != true) return;
     try {
       await ref.read(libraryControllerProvider.notifier).deleteBook(book.id);
       router.goNamed(AppRoutes.homeName);
@@ -83,7 +96,134 @@ class BookDetailScreen extends ConsumerWidget {
 }
 
 class _BookDetailView extends StatelessWidget {
-  const _BookDetailView({required this.book});
+  const _BookDetailView({required this.book, super.key});
+
+  final Book book;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 820;
+        return SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(wide ? 40 : 20, 24, wide ? 40 : 20, 48),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1040),
+              child: wide
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 330,
+                          height: 440,
+                          child: _DetailCover(book: book),
+                        ),
+                        const SizedBox(width: 52),
+                        Expanded(child: _BookInformation(book: book)),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: SizedBox(
+                            width: 250,
+                            height: 330,
+                            child: _DetailCover(book: book),
+                          ),
+                        ),
+                        const SizedBox(height: 34),
+                        _BookInformation(book: book),
+                      ],
+                    ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DetailCover extends StatelessWidget {
+  const _DetailCover({required this.book});
+
+  final Book book;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = _coverColors(book.title);
+    return Hero(
+      tag: 'book-cover-${book.id}',
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: colors,
+          ),
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: [
+            BoxShadow(
+              color: colors.last.withValues(alpha: 0.28),
+              blurRadius: 32,
+              offset: const Offset(0, 18),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -54,
+              bottom: -50,
+              child: Container(
+                width: 210,
+                height: 210,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.12),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.auto_stories_rounded,
+                    size: 34,
+                    color: Colors.white,
+                  ),
+                  const Spacer(),
+                  Text(
+                    _initials(book.title),
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontSize: 68,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'README.AI EDITION',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.78),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.8,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BookInformation extends StatelessWidget {
+  const _BookInformation({required this.book});
 
   final Book book;
 
@@ -91,27 +231,35 @@ class _BookDetailView extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-
-    return ListView(
-      padding: const EdgeInsets.all(24),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              child: Icon(
-                Icons.menu_book_outlined,
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            book.status.label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onPrimaryContainer,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(book.title, style: theme.textTheme.headlineSmall),
-            ),
-          ],
+          ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
+        Text(book.title, style: theme.textTheme.headlineLarge),
+        const SizedBox(height: 12),
+        Text(
+          'Open the book, select anything confusing, and let AI explain it '
+          'inside the context of what you are reading.',
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 28),
         FilledButton.icon(
           onPressed: () => context.goNamed(
             AppRoutes.readerName,
@@ -119,20 +267,44 @@ class _BookDetailView extends StatelessWidget {
           ),
           icon: const Icon(Icons.chrome_reader_mode_outlined),
           label: Text(l10n.readBook),
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
         ),
-        const SizedBox(height: 16),
-        _DetailRow(label: l10n.fieldStatus, value: book.status.label),
-        _DetailRow(label: l10n.fieldFileName, value: book.originalFilename),
-        _DetailRow(
-          label: l10n.fieldFileSize,
-          value: formatBytes(book.fileSize),
-        ),
-        if (book.totalPages != null)
-          _DetailRow(label: l10n.fieldPages, value: '${book.totalPages}'),
-        _DetailRow(
-          label: l10n.fieldUploadedAt,
-          value: book.uploadedAt.toLocal().toString().split('.').first,
+        const SizedBox(height: 30),
+        Text('About this file', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+          ),
+          child: Column(
+            children: [
+              _DetailRow(
+                icon: Icons.description_outlined,
+                label: l10n.fieldFileName,
+                value: book.originalFilename,
+              ),
+              _DetailRow(
+                icon: Icons.data_usage_outlined,
+                label: l10n.fieldFileSize,
+                value: formatBytes(book.fileSize),
+              ),
+              if (book.totalPages != null)
+                _DetailRow(
+                  icon: Icons.layers_outlined,
+                  label: l10n.fieldPages,
+                  value: '${book.totalPages}',
+                ),
+              _DetailRow(
+                icon: Icons.calendar_today_outlined,
+                label: l10n.fieldUploadedAt,
+                value: _friendlyDate(book.uploadedAt.toLocal()),
+                showDivider: false,
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -140,31 +312,138 @@ class _BookDetailView extends StatelessWidget {
 }
 
 class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value});
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.showDivider = true,
+  });
 
+  final IconData icon;
   final String label;
   final String value;
+  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(
-              label,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, size: 19, color: theme.colorScheme.primary),
               ),
-            ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          Expanded(child: Text(value, style: theme.textTheme.bodyLarge)),
-        ],
+        ),
+        if (showDivider)
+          Divider(
+            height: 1,
+            indent: 62,
+            color: theme.colorScheme.outlineVariant,
+          ),
+      ],
+    );
+  }
+}
+
+class _DetailError extends StatelessWidget {
+  const _DetailError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.menu_book_outlined, size: 52),
+            const SizedBox(height: 16),
+            Text(l10n.libraryLoadError),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: Text(l10n.retry),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+String _friendlyDate(DateTime date) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[date.month - 1]} ${date.day}, ${date.year}';
+}
+
+String _initials(String title) {
+  final words = title
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .take(2);
+  final value = words.map((word) => word[0].toUpperCase()).join();
+  return value.isEmpty ? 'R' : value;
+}
+
+List<Color> _coverColors(String title) {
+  const palettes = [
+    [Color(0xFF4D5FF7), Color(0xFF29369E)],
+    [Color(0xFFDF7A45), Color(0xFF8F3D42)],
+    [Color(0xFF237A68), Color(0xFF17483F)],
+    [Color(0xFF7655C6), Color(0xFF41307D)],
+    [Color(0xFF386C9B), Color(0xFF1D3C61)],
+  ];
+  return palettes[title.hashCode.abs() % palettes.length];
 }

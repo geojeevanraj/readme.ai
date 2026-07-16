@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Shown while the persisted authentication session is being resolved on
-/// startup. The router redirects away from here once the state is known.
+import '../../../core/theme/app_colors.dart';
+
+/// Branded transition shown while the persisted session is resolved.
 class SplashPage extends StatelessWidget {
   const SplashPage({super.key});
 
@@ -9,23 +10,62 @@ class SplashPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.menu_book_outlined,
-              size: 72,
-              color: theme.colorScheme.primary,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppColors.ink, Color(0xFF25294E)],
+              ),
             ),
-            const SizedBox(height: 32),
-            const SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 3),
+          ),
+          Center(
+            child: TweenAnimationBuilder<double>(
+              duration: const Duration(milliseconds: 650),
+              curve: Curves.easeOutBack,
+              tween: Tween(begin: 0.88, end: 1),
+              builder: (context, scale, child) =>
+                  Transform.scale(scale: scale, child: child),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 74,
+                    height: 74,
+                    decoration: BoxDecoration(
+                      color: AppColors.cobalt,
+                      borderRadius: BorderRadius.circular(23),
+                    ),
+                    child: const Icon(
+                      Icons.auto_stories_rounded,
+                      size: 36,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Text(
+                    'ReadMe.ai',
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  const SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: AppColors.apricot,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

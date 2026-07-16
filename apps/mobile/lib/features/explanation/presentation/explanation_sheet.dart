@@ -5,12 +5,9 @@ import '../../../l10n/generated/app_localizations.dart';
 import '../application/explanation_providers.dart';
 import '../domain/explanation.dart';
 import '../domain/prerequisite.dart';
+import '../domain/selection_type.dart';
 
-/// Unified bottom sheet showing an explanation of any selection.
-///
-/// Shown over the reader (which stays visible). Handles loading, error + retry,
-/// and close, and never navigates away. The content adapts automatically to the
-/// backend's selection type; the user is not shown any mode.
+/// Unified sheet showing the backend's contextual explanation for a selection.
 class ExplanationSheet extends ConsumerWidget {
   const ExplanationSheet({required this.args, super.key});
 
@@ -23,42 +20,75 @@ class ExplanationSheet extends ConsumerWidget {
     final state = ref.watch(explanationProvider(args));
 
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _title(args.selectedText),
-                    style: theme.textTheme.titleMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.84,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 2, 22, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.auto_awesome_rounded,
+                      color: theme.colorScheme.primary,
+                    ),
                   ),
-                ),
-                IconButton(
-                  tooltip: l10n.close,
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(context).maybePop(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            switch (state) {
-              AsyncData(:final value) => _ExplanationBody(explanation: value),
-              AsyncError() => _ErrorBody(
-                message: l10n.explanationError,
-                onRetry: () => ref.invalidate(explanationProvider(args)),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Explain this', style: theme.textTheme.titleLarge),
+                        const SizedBox(height: 2),
+                        Text(
+                          '“${_title(args.selectedText)}”',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontStyle: FontStyle.italic,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: l10n.close,
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                ],
               ),
-              _ => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 32),
-                child: Center(child: CircularProgressIndicator()),
+              const SizedBox(height: 20),
+              Flexible(
+                child: switch (state) {
+                  AsyncData(:final value) => SingleChildScrollView(
+                    child: _ExplanationBody(explanation: value),
+                  ),
+                  AsyncError() => _ErrorBody(
+                    message: l10n.explanationError,
+                    onRetry: () => ref.invalidate(explanationProvider(args)),
+                  ),
+                  _ => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 38),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                },
               ),
-            },
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -66,10 +96,7 @@ class ExplanationSheet extends ConsumerWidget {
 
   String _title(String text) {
     final trimmed = text.trim();
-    if (trimmed.length <= 60) {
-      return trimmed;
-    }
-    return '${trimmed.substring(0, 60)}…';
+    return trimmed.length <= 70 ? trimmed : '${trimmed.substring(0, 70)}…';
   }
 }
 
@@ -88,29 +115,107 @@ class _ExplanationBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _TypeBadge(type: explanation.selectionType),
+        const SizedBox(height: 16),
         if (meaning != null && meaning.isNotEmpty) ...[
-          Text(l10n.explanationMeaning, style: theme.textTheme.labelLarge),
-          const SizedBox(height: 2),
-          Text(meaning, style: theme.textTheme.bodyLarge),
-          const SizedBox(height: 12),
+          _SectionLabel(
+            icon: Icons.translate_rounded,
+            label: l10n.explanationMeaning,
+          ),
+          const SizedBox(height: 8),
+          Text(meaning, style: theme.textTheme.headlineSmall),
+          const SizedBox(height: 22),
         ],
+        const _SectionLabel(
+          icon: Icons.lightbulb_outline_rounded,
+          label: 'In this context',
+        ),
+        const SizedBox(height: 8),
         Text(explanation.explanation, style: theme.textTheme.bodyLarge),
         if (example != null && example.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text(l10n.explanationExample, style: theme.textTheme.labelLarge),
-          const SizedBox(height: 2),
-          Text(
-            example,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontStyle: FontStyle.italic,
-              color: theme.colorScheme.onSurfaceVariant,
+          const SizedBox(height: 22),
+          _SectionLabel(
+            icon: Icons.format_quote_rounded,
+            label: l10n.explanationExample,
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              example,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontStyle: FontStyle.italic,
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
             ),
           ),
         ],
         if (explanation.prerequisites.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           _PrerequisitesSection(prerequisites: explanation.prerequisites),
         ],
+      ],
+    );
+  }
+}
+
+class _TypeBadge extends StatelessWidget {
+  const _TypeBadge({required this.type});
+
+  final SelectionType type;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = switch (type) {
+      SelectionType.word => 'WORD',
+      SelectionType.sentence => 'SENTENCE',
+      SelectionType.paragraph => 'PASSAGE',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onPrimaryContainer,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(icon, size: 17, color: theme.colorScheme.primary),
+        const SizedBox(width: 7),
+        Text(
+          label.toUpperCase(),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.9,
+          ),
+        ),
       ],
     );
   }
@@ -124,23 +229,34 @@ class _PrerequisitesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     return Theme(
-      // Remove the divider lines for a cleaner look inside the sheet.
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 8),
-        title: Text(l10n.prerequisites),
-        children: [
-          for (final prerequisite in prerequisites)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.school_outlined),
-              title: Text(prerequisite.name),
-              subtitle: Text(prerequisite.reason),
-            ),
-        ],
+      data: theme.copyWith(dividerColor: Colors.transparent),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: ExpansionTile(
+          shape: const RoundedRectangleBorder(),
+          collapsedShape: const RoundedRectangleBorder(),
+          leading: const Icon(Icons.account_tree_outlined),
+          title: Text(l10n.prerequisites),
+          subtitle: const Text('Helpful ideas to know first'),
+          children: [
+            for (final prerequisite in prerequisites)
+              ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: Icon(
+                  Icons.school_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                title: Text(prerequisite.name),
+                subtitle: Text(prerequisite.reason),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -155,22 +271,32 @@ class _ErrorBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(message, style: Theme.of(context).textTheme.bodyLarge),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.tonalIcon(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.auto_awesome_outlined,
+              size: 44,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              message,
+              style: theme.textTheme.bodyLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            FilledButton.tonalIcon(
               onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
               label: Text(l10n.retry),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
