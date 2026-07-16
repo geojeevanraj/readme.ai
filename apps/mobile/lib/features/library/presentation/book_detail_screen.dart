@@ -8,6 +8,7 @@ import '../../../shared/formatters/byte_formatter.dart';
 import '../application/library_controller.dart';
 import '../application/library_providers.dart';
 import '../domain/book.dart';
+import '../domain/book_status.dart';
 
 /// Focused overview of a single book before entering the reader.
 class BookDetailScreen extends ConsumerWidget {
@@ -250,7 +251,10 @@ class _BookInformation extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        Text(book.title, style: theme.textTheme.headlineLarge),
+        Semantics(
+          header: true,
+          child: Text(book.title, style: theme.textTheme.headlineLarge),
+        ),
         const SizedBox(height: 12),
         Text(
           'Open the book, select anything confusing, and let AI explain it '
@@ -260,11 +264,41 @@ class _BookInformation extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 28),
-        FilledButton.icon(
-          onPressed: () => context.goNamed(
-            AppRoutes.readerName,
-            pathParameters: {'bookId': book.id},
+        if (book.status == BookStatus.failed) ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.error_outline_rounded,
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Processing failed. The file may be encrypted, scanned, '
+                    'or corrupted. Try uploading a different version.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(height: 16),
+        ],
+        FilledButton.icon(
+          onPressed: book.status == BookStatus.ready
+              ? () => context.goNamed(
+                  AppRoutes.readerName,
+                  pathParameters: {'bookId': book.id},
+                )
+              : null,
           icon: const Icon(Icons.chrome_reader_mode_outlined),
           label: Text(l10n.readBook),
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),

@@ -16,13 +16,17 @@ import '../../helpers/pump_app.dart';
 
 const _signedIn = AuthUser(uid: 'u1', email: 'a@b.com');
 
-Book _book({String id = 'b1', String title = 'Clean Architecture'}) => Book(
+Book _book({
+  String id = 'b1',
+  String title = 'Clean Architecture',
+  BookStatus status = BookStatus.uploaded,
+}) => Book(
   id: id,
   title: title,
   originalFilename: '$title.pdf',
   mimeType: 'application/pdf',
   fileSize: 2048,
-  status: BookStatus.uploaded,
+  status: status,
   uploadedAt: DateTime(2026),
 );
 
@@ -103,6 +107,94 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(BookCard), findsOneWidget);
+  });
+
+  testWidgets(
+    'upload shows progress, blocks duplicates, and confirms processing',
+    (tester) async {
+      final auth = FakeAuthRepository(initialUser: _signedIn);
+      addTearDown(auth.dispose);
+      final library = FakeLibraryRepository()
+        ..releaseUpload = Completer<void>();
+      final picker = FakeFilePicker(result: FakeFilePicker.sampleBook());
+
+      await pumpApp(
+        tester,
+        authRepository: auth,
+        libraryRepository: library,
+        filePicker: picker,
+      );
+
+      await tester.tap(
+        find.widgetWithText(FloatingActionButton, 'Upload book'),
+      );
+      await tester.pump();
+
+      expect(find.text('Uploading…'), findsOneWidget);
+      final uploadingButton = tester.widget<FloatingActionButton>(
+        find.byType(FloatingActionButton),
+      );
+      expect(uploadingButton.onPressed, isNull);
+
+      library.releaseUpload!.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BookCard), findsOneWidget);
+      expect(
+        find.text('sample.pdf uploaded. Processing started.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('failed documents explain recovery and cannot be opened', (
+    tester,
+  ) async {
+    final auth = FakeAuthRepository(initialUser: _signedIn);
+    addTearDown(auth.dispose);
+    final library = FakeLibraryRepository(
+      initial: [_book(status: BookStatus.failed)],
+    );
+
+    await pumpApp(tester, authRepository: auth, libraryRepository: library);
+    await tester.tap(find.byType(BookCard));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BookDetailScreen), findsOneWidget);
+    expect(find.textContaining('Processing failed'), findsOneWidget);
+    final readButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Read'),
+    );
+    expect(readButton.onPressed, isNull);
+  });
+
+  testWidgets('library remains stable at phone and desktop widths', (
+    tester,
+  ) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final auth = FakeAuthRepository(initialUser: _signedIn);
+    addTearDown(auth.dispose);
+    final library = FakeLibraryRepository(
+      initial: [
+        _book(id: 'b1'),
+        _book(id: 'b2', title: 'Designing Data-Intensive Applications'),
+        _book(id: 'b3', title: 'The Pragmatic Programmer'),
+      ],
+    );
+
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    await pumpApp(tester, authRepository: auth, libraryRepository: library);
+    expect(tester.takeException(), isNull);
+    expect(find.byType(BookCard), findsWidgets);
+
+    tester.view.physicalSize = const Size(1440, 1000);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(BookCard), findsNWidgets(3));
   });
 
   testWidgets('deleting a book removes it via the detail screen', (

@@ -14,6 +14,7 @@ from app.core.storage.provider import get_storage_service
 from app.db.session import get_db_session
 from app.modules.library.dependencies import get_book_service
 from app.modules.library.service import BookService
+from app.modules.processing.processors.pdf import PdfProcessor
 from app.modules.processing.processors.plain_text import PlainTextProcessor
 from app.modules.processing.registry import ProcessorRegistry
 from app.modules.processing.repository import ProcessingRepository
@@ -28,7 +29,7 @@ def get_processor_registry() -> ProcessorRegistry:
     Add future processors (PDF, EPUB, DOCX, OCR) to this list — the only place
     that needs to change to support a new format.
     """
-    return ProcessorRegistry([PlainTextProcessor()])
+    return ProcessorRegistry([PdfProcessor(), PlainTextProcessor()])
 
 
 def get_processing_repository(

@@ -21,6 +21,7 @@ class LibraryScreen extends ConsumerStatefulWidget {
 
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   String _query = '';
+  bool _isUploading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -45,9 +46,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _handleUpload(context),
-        icon: const Icon(Icons.add_rounded),
-        label: Text(l10n.uploadBook),
+        onPressed: _isUploading ? null : () => _handleUpload(context),
+        icon: _isUploading
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              )
+            : const Icon(Icons.add_rounded),
+        label: Text(_isUploading ? 'Uploading…' : l10n.uploadBook),
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 280),
@@ -61,7 +67,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             onRefresh: () =>
                 ref.read(libraryControllerProvider.notifier).refresh(),
             onOpen: (book) => _openBook(context, book),
-            onUpload: () => _handleUpload(context),
+            onUpload: _isUploading ? null : () => _handleUpload(context),
           ),
           AsyncError() => _ErrorView(
             key: const ValueKey('library-error'),
@@ -83,16 +89,28 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   }
 
   Future<void> _handleUpload(BuildContext context) async {
+    if (_isUploading) return;
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final picked = await ref.read(filePickerProvider).pickBook();
-    if (picked == null) return;
+    setState(() => _isUploading = true);
     try {
+      final picked = await ref.read(filePickerProvider).pickBook();
+      if (picked == null) return;
       await ref.read(libraryControllerProvider.notifier).uploadBook(picked);
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('${picked.filename} uploaded. Processing started.'),
+          ),
+        );
     } on Object {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(l10n.uploadFailed)));
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
     }
   }
 }
@@ -142,7 +160,7 @@ class _LibraryBody extends StatelessWidget {
   final ValueChanged<String> onQueryChanged;
   final Future<void> Function() onRefresh;
   final void Function(Book) onOpen;
-  final VoidCallback onUpload;
+  final VoidCallback? onUpload;
 
   @override
   Widget build(BuildContext context) {
@@ -247,7 +265,13 @@ class _LibraryHeader extends StatelessWidget {
         final copy = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Your reading room', style: theme.textTheme.headlineLarge),
+            Semantics(
+              header: true,
+              child: Text(
+                'Your reading room',
+                style: theme.textTheme.headlineLarge,
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
               bookCount == 0
@@ -291,7 +315,7 @@ class _LibraryHeader extends StatelessWidget {
 class _EmptyView extends StatelessWidget {
   const _EmptyView({required this.onUpload});
 
-  final VoidCallback onUpload;
+  final VoidCallback? onUpload;
 
   @override
   Widget build(BuildContext context) {

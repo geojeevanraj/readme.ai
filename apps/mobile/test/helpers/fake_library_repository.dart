@@ -20,6 +20,9 @@ class FakeLibraryRepository implements LibraryRepository {
   /// When set, [listBooks] awaits this before returning (to test loading).
   Completer<void>? releaseList;
 
+  /// When set, [uploadBook] awaits this before returning (to test progress).
+  Completer<void>? releaseUpload;
+
   int listCalls = 0;
 
   @override
@@ -40,6 +43,9 @@ class FakeLibraryRepository implements LibraryRepository {
 
   @override
   Future<Book> uploadBook(PickedBook file) async {
+    if (releaseUpload != null) {
+      await releaseUpload!.future;
+    }
     if (uploadError != null) {
       throw uploadError!;
     }
