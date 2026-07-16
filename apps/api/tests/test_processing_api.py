@@ -31,8 +31,11 @@ def _text_pdf(text: str = "Readable PDF content.") -> bytes:
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
             b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
         ),
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n"
-        + stream + b"\nendstream",
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
     pdf = bytearray(b"%PDF-1.4\n")
@@ -101,9 +104,7 @@ async def test_pdf_upload_is_processed_and_readable(client: AsyncClient) -> None
         mime="application/pdf",
     )
 
-    status_response = await client.get(
-        f"{_BOOKS}/{book_id}/processing", headers=_AUTH
-    )
+    status_response = await client.get(f"{_BOOKS}/{book_id}/processing", headers=_AUTH)
     content_response = await client.get(f"{_BOOKS}/{book_id}/content", headers=_AUTH)
     book_response = await client.get(f"{_BOOKS}/{book_id}", headers=_AUTH)
 

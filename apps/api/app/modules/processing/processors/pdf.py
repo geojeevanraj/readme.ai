@@ -12,7 +12,6 @@ import math
 
 from pypdf import PdfReader
 
-
 from app.modules.processing.document import (
     DocumentMetadata,
     ParsedChapter,
@@ -106,9 +105,9 @@ class PdfProcessor:
             page_count=page_count,
             word_count=word_count,
             character_count=len(text),
-            estimated_reading_minutes=math.ceil(word_count / _WORDS_PER_MINUTE)
-            if word_count
-            else None,
+            estimated_reading_minutes=(
+                math.ceil(word_count / _WORDS_PER_MINUTE) if word_count else None
+            ),
         )
         return StructuredDocument(metadata=metadata, chapters=[chapter], text=text)
 

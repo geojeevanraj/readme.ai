@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 
 from app.core.config import Settings, get_settings
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.library.dependencies import BookServiceDep
 from app.modules.library.schemas import BookListResponse, BookResponse
 from app.modules.processing.dependencies import ProcessingTriggerDep
-
-from typing import Annotated
-from fastapi import Depends
 
 router = APIRouter()
 

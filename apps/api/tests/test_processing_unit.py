@@ -68,9 +68,7 @@ def test_pdf_processor_extracts_readable_text_and_page_count() -> None:
     processor = PdfProcessor()
 
     assert processor.supports(mime_type="application/pdf", filename="book.bin")
-    assert processor.supports(
-        mime_type="application/octet-stream", filename="book.pdf"
-    )
+    assert processor.supports(mime_type="application/octet-stream", filename="book.pdf")
 
     document = processor.process(
         filename="book.pdf",
