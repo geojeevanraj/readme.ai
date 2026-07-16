@@ -57,4 +57,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build backend image
-        run: docker build -t readme-ai/api:ci apps/api
+        run: docker build -t readme-ai/api:ci .
