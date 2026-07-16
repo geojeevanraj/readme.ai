@@ -1,4 +1,5 @@
-import 'package:flutter/cupertino.dart' as cupertino;
+// ignore: unnecessary_import
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
@@ -200,8 +201,8 @@ abstract final class AppTheme {
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.iOS: cupertino.CupertinoPageTransitionsBuilder(),
-          TargetPlatform.macOS: cupertino.CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
           TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
           TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
         },
