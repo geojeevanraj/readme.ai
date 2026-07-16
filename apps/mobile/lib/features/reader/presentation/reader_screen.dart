@@ -33,6 +33,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   bool _restored = false;
   double _progress = 0;
   int _characterCount = 0;
+  String? _contentText;
 
   @override
   void dispose() {
@@ -105,9 +106,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final offset = _offsetFromFraction(_scrollFraction);
+    final label = _passageAt(_contentText ?? '', offset, maxLength: 72);
     await ref
         .read(readerControllerProvider)
-        .addBookmark(widget.bookId, anchor: offset.toString());
+        .addBookmark(
+          widget.bookId,
+          anchor: offset.toString(),
+          label: label.isEmpty ? null : label,
+        );
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -125,6 +131,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       isScrollControlled: true,
       builder: (_) => BookmarksSheet(
         bookId: widget.bookId,
+        contentText: _contentText,
+        characterCount: _characterCount,
         onJump: (Bookmark bookmark) {
           Navigator.of(context).pop();
           _jumpToAnchor(bookmark.anchor);
@@ -154,6 +162,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       isScrollControlled: true,
       builder: (_) => ExplanationSheet(args: args),
     );
+  }
+
+  void _explainCurrentPassage() {
+    final text = _contentText;
+    if (text == null || text.isEmpty) return;
+    final offset = _offsetFromFraction(_scrollFraction).clamp(0, text.length);
+    final start = _paragraphStart(text, offset);
+    final end = _paragraphEnd(text, offset);
+    final passage = text.substring(start, end).trim();
+    if (passage.isNotEmpty) _explainSelection(passage, start, end);
   }
 
   @override
@@ -236,6 +254,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     }
 
     _characterCount = content.characterCount;
+    _contentText = content.text;
     final progressAsync = ref.watch(readingProgressProvider(widget.bookId));
     final resume = progressAsync.value;
     if (resume != null) _restorePosition(resume.progressPercentage);
@@ -260,7 +279,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const _AiReadingHint(),
+                  _AiReadingHint(onExplain: _explainCurrentPassage),
                   const SizedBox(height: 24),
                   Container(
                     padding: EdgeInsets.symmetric(
@@ -307,43 +326,76 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 }
 
 class _AiReadingHint extends StatelessWidget {
-  const _AiReadingHint();
+  const _AiReadingHint({required this.onExplain});
+
+  final VoidCallback onExplain;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final message = Row(
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            Icons.auto_awesome_rounded,
+            size: 17,
+            color: theme.colorScheme.onPrimary,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Need clarity?',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                'Select a passage, or explain what you are reading now.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final action = FilledButton.icon(
+      onPressed: onExplain,
+      icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+      label: const Text('Explain'),
+    );
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.primaryContainer,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              Icons.auto_awesome_rounded,
-              size: 17,
-              color: theme.colorScheme.onPrimary,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Select any word or passage, then tap Explain.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onPrimaryContainer,
-                fontWeight: FontWeight.w600,
+      child: LayoutBuilder(
+        builder: (context, constraints) => constraints.maxWidth < 520
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [message, const SizedBox(height: 12), action],
+              )
+            : Row(
+                children: [
+                  Expanded(child: message),
+                  const SizedBox(width: 16),
+                  action,
+                ],
               ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -392,7 +444,8 @@ class _UnsupportedView extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Text files are fully supported today. PDF reading is coming next.',
+                'Text-based PDF and plain-text files are supported. '
+                'Scanned or encrypted files may need OCR or a password first.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -404,6 +457,32 @@ class _UnsupportedView extends StatelessWidget {
       ),
     );
   }
+}
+
+int _paragraphStart(String text, int offset) {
+  if (text.isEmpty) return 0;
+  final safeOffset = offset.clamp(0, text.length);
+  final separator = text.lastIndexOf(
+    '\n\n',
+    safeOffset == 0 ? 0 : safeOffset - 1,
+  );
+  return separator == -1 ? 0 : separator + 2;
+}
+
+int _paragraphEnd(String text, int offset) {
+  if (text.isEmpty) return 0;
+  final separator = text.indexOf('\n\n', offset.clamp(0, text.length));
+  return separator == -1 ? text.length : separator;
+}
+
+String _passageAt(String text, int offset, {required int maxLength}) {
+  if (text.isEmpty) return '';
+  final passage = text
+      .substring(_paragraphStart(text, offset), _paragraphEnd(text, offset))
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (passage.length <= maxLength) return passage;
+  return '${passage.substring(0, maxLength - 1).trimRight()}…';
 }
 
 class _ReaderError extends StatelessWidget {

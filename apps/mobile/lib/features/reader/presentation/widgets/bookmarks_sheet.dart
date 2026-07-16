@@ -6,15 +6,30 @@ import '../../application/reader_providers.dart';
 import '../../domain/bookmark.dart';
 
 /// Bottom sheet listing the book's saved positions.
-class BookmarksSheet extends ConsumerWidget {
-  const BookmarksSheet({required this.bookId, required this.onJump, super.key});
+class BookmarksSheet extends ConsumerStatefulWidget {
+  const BookmarksSheet({
+    required this.bookId,
+    required this.onJump,
+    this.contentText,
+    this.characterCount = 0,
+    super.key,
+  });
 
   final String bookId;
   final void Function(Bookmark) onJump;
+  final String? contentText;
+  final int characterCount;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bookmarks = ref.watch(bookmarksProvider(bookId));
+  ConsumerState<BookmarksSheet> createState() => _BookmarksSheetState();
+}
+
+class _BookmarksSheetState extends ConsumerState<BookmarksSheet> {
+  Bookmark? _deletedBookmark;
+
+  @override
+  Widget build(BuildContext context) {
+    final bookmarks = ref.watch(bookmarksProvider(widget.bookId));
     final theme = Theme.of(context);
 
     return SafeArea(
@@ -64,6 +79,30 @@ class BookmarksSheet extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 20),
+              if (_deletedBookmark != null) ...[
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline_rounded,
+                        color: theme.colorScheme.onSecondaryContainer,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(child: Text('Bookmark deleted')),
+                      TextButton(
+                        onPressed: _undoDelete,
+                        child: const Text('Undo'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               Flexible(
                 child: bookmarks.when(
                   loading: () => const Padding(
@@ -119,18 +158,19 @@ class BookmarksSheet extends ConsumerWidget {
                                   ),
                                 ),
                                 title: Text(
-                                  bookmark.label ?? 'Bookmark',
+                                  _bookmarkLabel(bookmark),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                subtitle: const Text('Tap to continue here'),
-                                onTap: () => onJump(bookmark),
+                                subtitle: Text(
+                                  '${_bookmarkPercentage(bookmark)}% through · '
+                                  'Tap to continue',
+                                ),
+                                onTap: () => widget.onJump(bookmark),
                                 trailing: IconButton(
                                   tooltip: 'Delete bookmark',
                                   icon: const Icon(Icons.delete_outline),
-                                  onPressed: () => ref
-                                      .read(readerControllerProvider)
-                                      .deleteBookmark(bookId, bookmark.id),
+                                  onPressed: () => _deleteWithUndo(bookmark),
                                 ),
                               ),
                             );
@@ -143,6 +183,51 @@ class BookmarksSheet extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  String _bookmarkLabel(Bookmark bookmark) {
+    final supplied = bookmark.label?.trim();
+    if (supplied != null && supplied.isNotEmpty) return supplied;
+
+    final text = widget.contentText;
+    final offset = int.tryParse(bookmark.anchor);
+    if (text == null || text.isEmpty || offset == null) {
+      return 'Saved reading place';
+    }
+    final safeOffset = offset.clamp(0, text.length);
+    final end = (safeOffset + 72).clamp(safeOffset, text.length);
+    final excerpt = text
+        .substring(safeOffset, end)
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return excerpt.isEmpty ? 'Saved reading place' : excerpt;
+  }
+
+  int _bookmarkPercentage(Bookmark bookmark) {
+    if (widget.characterCount <= 0) return 0;
+    final offset = int.tryParse(bookmark.anchor) ?? 0;
+    return ((offset.clamp(0, widget.characterCount) / widget.characterCount) *
+            100)
+        .round();
+  }
+
+  Future<void> _deleteWithUndo(Bookmark bookmark) async {
+    final controller = ref.read(readerControllerProvider);
+    await controller.deleteBookmark(widget.bookId, bookmark.id);
+    if (mounted) setState(() => _deletedBookmark = bookmark);
+  }
+
+  Future<void> _undoDelete() async {
+    final bookmark = _deletedBookmark;
+    if (bookmark == null) return;
+    await ref
+        .read(readerControllerProvider)
+        .addBookmark(
+          widget.bookId,
+          anchor: bookmark.anchor,
+          label: bookmark.label,
+        );
+    if (mounted) setState(() => _deletedBookmark = null);
   }
 }
 

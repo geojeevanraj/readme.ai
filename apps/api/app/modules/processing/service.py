@@ -9,10 +9,12 @@ it during upload cannot fail the upload.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 
 from app.core.storage.base import StorageService
+from app.modules.library.enums import BookStatus
 from app.modules.library.service import BookService
 from app.modules.processing.enums import ProcessingErrorCode, ProcessingStatus
 from app.modules.processing.models import ProcessedBook
@@ -60,6 +62,7 @@ class ProcessingService:
         record = await self._repository.upsert_record(
             book_id, ProcessingStatus.PROCESSING
         )
+        book.status = BookStatus.PROCESSING
         await self._repository.commit()
 
         try:
@@ -77,20 +80,25 @@ class ProcessingService:
                     ProcessingErrorCode.UNSUPPORTED_FORMAT,
                     f"No processor supports '{book.mime_type}'.",
                 )
-            document = processor.process(
+            document = await asyncio.to_thread(
+                processor.process,
                 filename=book.original_filename,
                 mime_type=book.mime_type,
                 data=data,
             )
             await self._repository.save_completed(record, document, processor.name)
+            book.status = BookStatus.READY
+            book.total_pages = document.metadata.page_count
         except ProcessingError as error:
             await self._repository.save_failed(record, error.code, error.message)
+            book.status = BookStatus.FAILED
         except Exception as error:
             # Record any unexpected failure as a structured internal error
             # rather than letting it escape and break the triggering request.
             await self._repository.save_failed(
                 record, ProcessingErrorCode.INTERNAL, str(error)
             )
+            book.status = BookStatus.FAILED
 
         await self._repository.commit()
         return record

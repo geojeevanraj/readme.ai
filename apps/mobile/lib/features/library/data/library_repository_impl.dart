@@ -1,9 +1,19 @@
 import 'package:dio/dio.dart';
+import 'package:http_parser/http_parser.dart';
 
 import '../../../core/files/picked_book.dart';
 import '../domain/book.dart';
 import '../domain/library_repository.dart';
 import 'book_dto.dart';
+
+/// Build the multipart payload while preserving the selected file's metadata.
+FormData bookUploadForm(PickedBook file) => FormData.fromMap({
+  'file': MultipartFile.fromBytes(
+    file.bytes,
+    filename: file.filename,
+    contentType: MediaType.parse(file.mimeType ?? 'application/octet-stream'),
+  ),
+});
 
 /// [LibraryRepository] backed by the ReadMe.ai HTTP API via [Dio].
 ///
@@ -32,9 +42,7 @@ class LibraryRepositoryImpl implements LibraryRepository {
 
   @override
   Future<Book> uploadBook(PickedBook file) async {
-    final formData = FormData.fromMap({
-      'file': MultipartFile.fromBytes(file.bytes, filename: file.filename),
-    });
+    final formData = bookUploadForm(file);
     final response = await _dio.post<Map<String, dynamic>>(
       _basePath,
       data: formData,

@@ -103,7 +103,7 @@ class _HorizontalBook extends StatelessWidget {
         SizedBox(width: 124, child: _BookCover(book: book, compact: true)),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,

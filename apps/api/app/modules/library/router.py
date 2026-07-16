@@ -6,12 +6,25 @@ import uuid
 
 from fastapi import APIRouter, File, Form, UploadFile, status
 
+from app.core.config import Settings, get_settings
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.library.dependencies import BookServiceDep
 from app.modules.library.schemas import BookListResponse, BookResponse
 from app.modules.processing.dependencies import ProcessingTriggerDep
 
+from typing import Annotated
+from fastapi import Depends
+
 router = APIRouter()
+
+
+async def _read_upload_with_limit(file: UploadFile, max_bytes: int) -> bytes:
+    """Read at most *max_bytes + 1* from the upload stream.
+
+    Reading one byte beyond the configured limit lets the downstream service
+    detect oversized payloads without buffering the entire file into memory.
+    """
+    return await file.read(max_bytes + 1)
 
 
 @router.post(
@@ -24,6 +37,7 @@ async def upload_book(
     user: CurrentUser,
     service: BookServiceDep,
     processing: ProcessingTriggerDep,
+    settings: Annotated[Settings, Depends(get_settings)],
     file: UploadFile = File(..., description="The book file to upload."),
     title: str | None = Form(default=None, description="Optional display title."),
 ) -> BookResponse:
@@ -33,7 +47,7 @@ async def upload_book(
     today, a background worker later) and never fails the upload — processing
     errors are recorded as the book's processing status.
     """
-    content = await file.read()
+    content = await _read_upload_with_limit(file, settings.max_upload_size_bytes)
     book = await service.upload(
         user_id=user.id,
         filename=file.filename or "book",
@@ -41,8 +55,9 @@ async def upload_book(
         content_type=file.content_type,
         title=title,
     )
+    response = BookResponse.model_validate(book)
     await processing.schedule(user.id, book.id)
-    return BookResponse.model_validate(book)
+    return response
 
 
 @router.get("", response_model=BookListResponse, summary="List the user's books")

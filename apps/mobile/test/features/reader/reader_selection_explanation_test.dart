@@ -12,7 +12,12 @@ Future<void> _selectAndExplain(WidgetTester tester) async {
   // toolbar, which includes our "Explain" action.
   await tester.longPress(find.byType(ExplainableText));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Explain'));
+  final contextualExplain = find.descendant(
+    of: find.byType(AdaptiveTextSelectionToolbar),
+    matching: find.text('Explain'),
+  );
+  expect(contextualExplain, findsOneWidget);
+  await tester.tap(contextualExplain);
   await tester.pumpAndSettle();
 }
 
