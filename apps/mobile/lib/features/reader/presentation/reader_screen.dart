@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../explanation/presentation/explanation_sheet.dart';
 import '../application/reader_controller.dart';
@@ -15,11 +16,7 @@ import 'widgets/bookmarks_sheet.dart';
 import 'widgets/explainable_text.dart';
 import 'widgets/reader_settings_sheet.dart';
 
-/// The immersive reading screen for a single book.
-///
-/// Renders reflowable text with adjustable typography, restores the saved
-/// position on open, persists position as the user reads, and manages
-/// bookmarks. There are deliberately no AI affordances or text-selection tools.
+/// Immersive, API-backed reader with contextual AI assistance.
 class ReaderScreen extends ConsumerStatefulWidget {
   const ReaderScreen({required this.bookId, super.key});
 
@@ -45,15 +42,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     super.dispose();
   }
 
-  // --- Position helpers --------------------------------------------------
   double get _scrollFraction {
-    if (!_scrollController.hasClients) {
-      return 0;
-    }
+    if (!_scrollController.hasClients) return 0;
     final max = _scrollController.position.maxScrollExtent;
-    if (max <= 0) {
-      return 0;
-    }
+    if (max <= 0) return 0;
     return (_scrollController.offset / max).clamp(0.0, 1.0);
   }
 
@@ -68,9 +60,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _persistPosition() {
-    if (!_scrollController.hasClients || _characterCount == 0) {
-      return;
-    }
+    if (!_scrollController.hasClients || _characterCount == 0) return;
     final fraction = _scrollFraction;
     final seconds = _sessionStopwatch.elapsed.inSeconds;
     _sessionStopwatch
@@ -89,14 +79,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _restorePosition(double percentage) {
-    if (_restored) {
-      return;
-    }
+    if (_restored) return;
     _restored = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) {
-        return;
-      }
+      if (!_scrollController.hasClients || !mounted) return;
       final max = _scrollController.position.maxScrollExtent;
       final target = (percentage / 100).clamp(0.0, 1.0) * max;
       _scrollController.jumpTo(target);
@@ -106,18 +92,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   void _jumpToAnchor(String anchor) {
     final offset = int.tryParse(anchor) ?? 0;
-    if (_characterCount == 0 || !_scrollController.hasClients) {
-      return;
-    }
+    if (_characterCount == 0 || !_scrollController.hasClients) return;
     final fraction = (offset / _characterCount).clamp(0.0, 1.0);
     _scrollController.animateTo(
       fraction * _scrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeOutCubic,
     );
   }
 
-  // --- Actions -----------------------------------------------------------
   Future<void> _addBookmark() async {
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -127,13 +110,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         .addBookmark(widget.bookId, anchor: offset.toString());
     messenger
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(l10n.bookmarkAdded)));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(l10n.bookmarkAdded),
+          action: SnackBarAction(label: 'View', onPressed: _openBookmarks),
+        ),
+      );
   }
 
   void _openBookmarks() {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (_) => BookmarksSheet(
         bookId: widget.bookId,
         onJump: (Bookmark bookmark) {
@@ -147,6 +136,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void _openSettings() {
     showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
       builder: (_) => const ReaderSettingsSheet(),
     );
   }
@@ -161,6 +151,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (_) => ExplanationSheet(args: args),
     );
   }
@@ -169,13 +160,28 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final contentState = ref.watch(bookContentProvider(widget.bookId));
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          contentState.value?.title ?? l10n.appTitle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        toolbarHeight: 68,
+        backgroundColor: theme.colorScheme.surface,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              contentState.value?.title ?? l10n.appTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              '${(_progress * 100).round()}% complete',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
@@ -188,42 +194,57 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             icon: const Icon(Icons.bookmarks_outlined),
             onPressed: _openBookmarks,
           ),
-          IconButton(
-            tooltip: l10n.readerSettings,
-            icon: const Icon(Icons.tune),
-            onPressed: _openSettings,
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              tooltip: l10n.readerSettings,
+              icon: const Icon(Icons.tune_rounded),
+              onPressed: _openSettings,
+            ),
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(2),
-          child: LinearProgressIndicator(value: _progress.clamp(0.0, 1.0)),
+          preferredSize: const Size.fromHeight(3),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: _progress.clamp(0.0, 1.0)),
+            duration: const Duration(milliseconds: 180),
+            builder: (context, value, _) =>
+                LinearProgressIndicator(minHeight: 3, value: value),
+          ),
         ),
       ),
-      body: switch (contentState) {
-        AsyncData(:final value) => _buildContent(context, value),
-        AsyncError() => Center(child: Text(l10n.libraryLoadError)),
-        _ => const Center(child: CircularProgressIndicator()),
-      },
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        child: switch (contentState) {
+          AsyncData(:final value) => _buildContent(context, value),
+          AsyncError() => _ReaderError(
+            onRetry: () => ref.invalidate(bookContentProvider(widget.bookId)),
+          ),
+          _ => const Center(child: CircularProgressIndicator()),
+        },
+      ),
     );
   }
 
   Widget _buildContent(BuildContext context, BookContent content) {
     final l10n = AppLocalizations.of(context);
     if (content.format != ContentFormat.text || content.text == null) {
-      return _UnsupportedView(message: l10n.readerUnsupportedFormat);
+      return _UnsupportedView(
+        key: const ValueKey('unsupported-reader'),
+        message: l10n.readerUnsupportedFormat,
+      );
     }
 
     _characterCount = content.characterCount;
     final progressAsync = ref.watch(readingProgressProvider(widget.bookId));
     final resume = progressAsync.value;
-    if (resume != null) {
-      _restorePosition(resume.progressPercentage);
-    }
+    if (resume != null) _restorePosition(resume.progressPercentage);
 
     final settings = ref.watch(readerSettingsProvider);
     final theme = Theme.of(context);
 
     return NotificationListener<ScrollUpdateNotification>(
+      key: const ValueKey('text-reader'),
       onNotification: (_) {
         _onScroll();
         return false;
@@ -232,20 +253,50 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         controller: _scrollController,
         child: SingleChildScrollView(
           controller: _scrollController,
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 64),
+          padding: const EdgeInsets.fromLTRB(20, 26, 20, 80),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 680),
-              child: ExplainableText(
-                text: content.text!,
-                explainLabel: l10n.explain,
-                style:
-                    theme.textTheme.bodyLarge?.copyWith(
-                      fontSize: settings.fontSize,
-                      height: settings.lineHeight,
-                    ) ??
-                    TextStyle(fontSize: settings.fontSize),
-                onExplain: _explainSelection,
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _AiReadingHint(),
+                  const SizedBox(height: 24),
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: MediaQuery.sizeOf(context).width > 620
+                          ? 48
+                          : 24,
+                      vertical: 42,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.ink.withValues(alpha: 0.035),
+                          blurRadius: 24,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: ExplainableText(
+                      text: content.text!,
+                      explainLabel: l10n.explain,
+                      style:
+                          theme.textTheme.bodyLarge?.copyWith(
+                            fontSize: settings.fontSize,
+                            height: settings.lineHeight,
+                            letterSpacing: 0.05,
+                          ) ??
+                          TextStyle(fontSize: settings.fontSize),
+                      onExplain: _explainSelection,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -255,8 +306,51 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 }
 
+class _AiReadingHint extends StatelessWidget {
+  const _AiReadingHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.auto_awesome_rounded,
+              size: 17,
+              color: theme.colorScheme.onPrimary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Select any word or passage, then tap Explain.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onPrimaryContainer,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _UnsupportedView extends StatelessWidget {
-  const _UnsupportedView({required this.message});
+  const _UnsupportedView({required this.message, super.key});
 
   final String message;
 
@@ -266,22 +360,74 @@ class _UnsupportedView extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.picture_as_pdf_outlined,
-              size: 64,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-          ],
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 440),
+          padding: const EdgeInsets.all(30),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(21),
+                ),
+                child: Icon(
+                  Icons.picture_as_pdf_outlined,
+                  size: 31,
+                  color: theme.colorScheme.secondary,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                message,
+                style: theme.textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Text files are fully supported today. PDF reading is coming next.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _ReaderError extends StatelessWidget {
+  const _ReaderError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_off_outlined, size: 52),
+          const SizedBox(height: 16),
+          Text(l10n.libraryLoadError),
+          const SizedBox(height: 18),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(l10n.retry),
+          ),
+        ],
       ),
     );
   }
