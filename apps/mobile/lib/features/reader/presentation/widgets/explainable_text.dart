@@ -35,11 +35,18 @@ class _ExplainableTextState extends State<ExplainableText> {
     }
     final start = selection.start.clamp(0, widget.text.length);
     final end = selection.end.clamp(0, widget.text.length);
-    final selected = widget.text.substring(start, end).trim();
+    final rawSelected = widget.text.substring(start, end);
+    final leadingWhitespace =
+        rawSelected.length - rawSelected.trimLeft().length;
+    final trailingWhitespace =
+        rawSelected.length - rawSelected.trimRight().length;
+    final adjustedStart = start + leadingWhitespace;
+    final adjustedEnd = end - trailingWhitespace;
+    final selected = widget.text.substring(adjustedStart, adjustedEnd);
     if (selected.isEmpty) {
       return;
     }
-    widget.onExplain(selected, start, end);
+    widget.onExplain(selected, adjustedStart, adjustedEnd);
   }
 
   @override

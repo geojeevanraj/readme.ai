@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:readme_ai/features/explanation/presentation/explanation_sheet.dart';
+import 'package:readme_ai/features/reader/domain/character_anchor.dart';
 import 'package:readme_ai/features/reader/presentation/widgets/explainable_text.dart';
 
 import '../../helpers/fake_explanation_repository.dart';
@@ -56,5 +57,53 @@ void main() {
     // Sheet dismissed; the reader (with its selectable text) is still there.
     expect(find.byType(ExplanationSheet), findsNothing);
     expect(find.byType(ExplainableText), findsOneWidget);
+  });
+
+  testWidgets('Explain sends exact Unicode scalar anchors for selected text', (
+    tester,
+  ) async {
+    const text =
+        '😀😃😄 A curious reader studies every luminous sentence carefully.';
+    final explanation = FakeExplanationRepository();
+    await pumpReader(
+      tester,
+      repository: FakeReaderRepository(
+        content: FakeReaderRepository.textContent(text: text),
+      ),
+      explanationRepository: explanation,
+    );
+
+    await _selectAndExplain(tester);
+
+    final start = int.parse(explanation.lastAnchor!);
+    final end = int.parse(explanation.lastEndAnchor!);
+    expect(
+      CharacterAnchor.substring(text, start, end),
+      explanation.lastSelectedText,
+    );
+  });
+
+  testWidgets('current-passage Explain sends exact trimmed scalar range', (
+    tester,
+  ) async {
+    const text = '  😀 Current passage with surrounding whitespace.  \n\nNext.';
+    final explanation = FakeExplanationRepository();
+    await pumpReader(
+      tester,
+      repository: FakeReaderRepository(
+        content: FakeReaderRepository.textContent(text: text),
+      ),
+      explanationRepository: explanation,
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Explain'));
+    await tester.pumpAndSettle();
+
+    final start = int.parse(explanation.lastAnchor!);
+    final end = int.parse(explanation.lastEndAnchor!);
+    expect(
+      CharacterAnchor.substring(text, start, end),
+      explanation.lastSelectedText,
+    );
   });
 }

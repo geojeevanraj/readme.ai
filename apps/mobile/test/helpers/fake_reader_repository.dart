@@ -1,5 +1,6 @@
 import 'package:readme_ai/features/reader/domain/book_content.dart';
 import 'package:readme_ai/features/reader/domain/bookmark.dart';
+import 'package:readme_ai/features/reader/domain/character_anchor.dart';
 import 'package:readme_ai/features/reader/domain/content_format.dart';
 import 'package:readme_ai/features/reader/domain/reader_repository.dart';
 import 'package:readme_ai/features/reader/domain/reading_progress.dart';
@@ -21,6 +22,12 @@ class FakeReaderRepository implements ReaderRepository {
   /// The most recently saved progress (for assertions).
   ReadingProgress? lastSaved;
 
+  /// The most recently created bookmark anchor (for assertions).
+  String? lastCreatedBookmarkAnchor;
+
+  /// The most recently created bookmark label (for assertions).
+  String? lastCreatedBookmarkLabel;
+
   static BookContent textContent({
     String text =
         'It was a bright cold day in April, and the clocks were '
@@ -29,7 +36,7 @@ class FakeReaderRepository implements ReaderRepository {
     bookId: 'b1',
     title: 'Nineteen Eighty-Four',
     format: ContentFormat.text,
-    characterCount: text.length,
+    characterCount: CharacterAnchor.length(text),
     text: text,
   );
 
@@ -74,6 +81,8 @@ class FakeReaderRepository implements ReaderRepository {
     required String anchor,
     String? label,
   }) async {
+    lastCreatedBookmarkAnchor = anchor;
+    lastCreatedBookmarkLabel = label;
     final bookmark = Bookmark(
       id: 'bm-${_bookmarks.length + 1}',
       anchor: anchor,
