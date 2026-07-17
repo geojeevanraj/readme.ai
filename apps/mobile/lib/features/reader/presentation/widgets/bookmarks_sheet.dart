@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../application/reader_controller.dart';
 import '../../application/reader_providers.dart';
 import '../../domain/bookmark.dart';
+import '../../domain/character_anchor.dart';
 
 /// Bottom sheet listing the book's saved positions.
 class BookmarksSheet extends ConsumerStatefulWidget {
@@ -194,12 +195,16 @@ class _BookmarksSheetState extends ConsumerState<BookmarksSheet> {
     if (text == null || text.isEmpty || offset == null) {
       return 'Saved reading place';
     }
-    final safeOffset = offset.clamp(0, text.length);
-    final end = (safeOffset + 72).clamp(safeOffset, text.length);
-    final excerpt = text
-        .substring(safeOffset, end)
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    final safeOffset = offset.clamp(0, CharacterAnchor.length(text));
+    final end = (safeOffset + 72).clamp(
+      safeOffset,
+      CharacterAnchor.length(text),
+    );
+    final excerpt = CharacterAnchor.substring(
+      text,
+      safeOffset,
+      end,
+    ).replaceAll(RegExp(r'\s+'), ' ').trim();
     return excerpt.isEmpty ? 'Saved reading place' : excerpt;
   }
 

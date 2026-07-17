@@ -39,17 +39,19 @@ class ReaderSettingsSheet extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(width: 13),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Reading style', style: theme.textTheme.titleLarge),
-                    Text(
-                      'Make the page feel right for you',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Reading style', style: theme.textTheme.titleLarge),
+                      Text(
+                        'Make the page feel right for you',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
