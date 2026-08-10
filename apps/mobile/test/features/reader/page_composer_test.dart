@@ -224,8 +224,10 @@ List<RenderBlock> _compose({
 );
 
 /// Concatenated text of every block that carries characters.
-String _rendered(List<RenderBlock> blocks) =>
-    blocks.where((block) => block.carriesText).map((block) => block.text).join();
+String _rendered(List<RenderBlock> blocks) => blocks
+    .where((block) => block.carriesText)
+    .map((block) => block.text)
+    .join();
 
 void main() {
   group('coverage without duplication', () {
@@ -257,9 +259,11 @@ void main() {
 
       final seen = <int>{};
       for (final block in blocks.where((b) => b.carriesText)) {
-        for (var offset = block.visibleSpan.start;
-            offset < block.visibleSpan.end;
-            offset++) {
+        for (
+          var offset = block.visibleSpan.start;
+          offset < block.visibleSpan.end;
+          offset++
+        ) {
           expect(seen.add(offset), isTrue, reason: 'offset $offset repeated');
         }
       }
@@ -395,9 +399,7 @@ void main() {
     test('input order does not affect output', () {
       final forward = _compose(elements: _elements());
       final reversed = _compose(elements: _elements().reversed.toList());
-      final shuffled = _compose(
-        elements: _elements()..shuffle(),
-      );
+      final shuffled = _compose(elements: _elements()..shuffle());
 
       expect(reversed, forward);
       expect(shuffled, forward);
@@ -600,9 +602,10 @@ void main() {
         ),
       ];
 
-      final items = _compose(page: page, elements: elements)
-          .where((block) => block.kind == ReaderElementKind.listItem)
-          .toList();
+      final items = _compose(
+        page: page,
+        elements: elements,
+      ).where((block) => block.kind == ReaderElementKind.listItem).toList();
 
       expect(items.map((item) => item.marker), [
         BlockMarker.number,
@@ -669,9 +672,10 @@ void main() {
         ),
       ];
 
-      final items = _compose(page: page, elements: elements)
-          .where((block) => block.kind == ReaderElementKind.listItem)
-          .toList();
+      final items = _compose(
+        page: page,
+        elements: elements,
+      ).where((block) => block.kind == ReaderElementKind.listItem).toList();
 
       expect(items.map((item) => item.depth), [1, 2]);
     });

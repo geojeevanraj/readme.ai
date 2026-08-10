@@ -15,7 +15,8 @@ class CaptionRenderer extends KindRenderer {
   @override
   Widget build(BuildContext context, RenderBlock block, RenderContext render) {
     final element = block.element;
-    final text = element is CaptionElement && (element.text?.isNotEmpty ?? false)
+    final text =
+        element is CaptionElement && (element.text?.isNotEmpty ?? false)
         ? element.text!
         : block.text;
 

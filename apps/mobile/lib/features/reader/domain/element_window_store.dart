@@ -80,7 +80,8 @@ class ElementWindowStore {
 
   /// In-flight fetches, so concurrent readers of one chunk share a single
   /// request instead of stampeding the API on a fast page turn.
-  final Map<int, Future<ElementWindow>> _inFlight = <int, Future<ElementWindow>>{};
+  final Map<int, Future<ElementWindow>> _inFlight =
+      <int, Future<ElementWindow>>{};
 
   bool _disposed = false;
 

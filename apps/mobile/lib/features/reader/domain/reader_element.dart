@@ -87,7 +87,14 @@ sealed class ReaderElement {
 
   /// Fields compared for equality, extended by each subclass.
   @protected
-  List<Object?> get props => [id, parentId, orderIndex, sequence, span, pageNumber];
+  List<Object?> get props => [
+    id,
+    parentId,
+    orderIndex,
+    sequence,
+    span,
+    pageNumber,
+  ];
 
   @override
   bool operator ==(Object other) =>

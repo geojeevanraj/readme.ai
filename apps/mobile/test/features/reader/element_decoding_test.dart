@@ -53,9 +53,13 @@ void main() {
   group('window metadata', () {
     test('decodes bounds, character count and truncation', () {
       final window = ElementWindowDecoder.decode(
-        _window([
-          _element(id: 'p', type: 'paragraph', start: 0, end: 30),
-        ], start: 20000, end: 40000, characterCount: 2091963, truncated: true),
+        _window(
+          [_element(id: 'p', type: 'paragraph', start: 0, end: 30)],
+          start: 20000,
+          end: 40000,
+          characterCount: 2091963,
+          truncated: true,
+        ),
       );
 
       expect(window.start, 20000);
@@ -176,13 +180,7 @@ void main() {
 
     test('list item decodes with its span', () {
       final item = _single<ListItemElement>(
-        _element(
-          id: 'i',
-          type: 'list_item',
-          parentId: 'l',
-          start: 65,
-          end: 75,
-        ),
+        _element(id: 'i', type: 'list_item', parentId: 'l', start: 65, end: 75),
       );
 
       expect(item.parentId, 'l');
@@ -222,30 +220,33 @@ void main() {
       expect(formula.representationFormat, 'pdf_text');
     });
 
-    test('image decodes identifier, dimensions, media type and caption link', () {
-      final image = _single<ImageElement>(
-        _element(
-          id: 'img',
-          type: 'image',
-          payload: const {
-            'image_identifier': 'sha256:abc',
-            'width': 200,
-            'height': 100.5,
-            'media_type': 'image/png',
-            'caption_id': 'cap',
-          },
-          pageNumber: 7,
-        ),
-      );
+    test(
+      'image decodes identifier, dimensions, media type and caption link',
+      () {
+        final image = _single<ImageElement>(
+          _element(
+            id: 'img',
+            type: 'image',
+            payload: const {
+              'image_identifier': 'sha256:abc',
+              'width': 200,
+              'height': 100.5,
+              'media_type': 'image/png',
+              'caption_id': 'cap',
+            },
+            pageNumber: 7,
+          ),
+        );
 
-      expect(image.identifier, 'sha256:abc');
-      expect(image.width, 200.0);
-      expect(image.height, 100.5);
-      expect(image.mediaType, 'image/png');
-      expect(image.captionId, 'cap');
-      expect(image.pageNumber, 7);
-      expect(image.span, isNull);
-    });
+        expect(image.identifier, 'sha256:abc');
+        expect(image.width, 200.0);
+        expect(image.height, 100.5);
+        expect(image.mediaType, 'image/png');
+        expect(image.captionId, 'cap');
+        expect(image.pageNumber, 7);
+        expect(image.span, isNull);
+      },
+    );
 
     test('caption decodes its target and delivered text', () {
       final caption = _single<CaptionElement>(

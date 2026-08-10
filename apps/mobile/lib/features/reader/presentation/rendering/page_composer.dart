@@ -30,7 +30,10 @@ class PageComposer {
 
   /// Compose using structure already resident in [outline].
   List<RenderBlock> composeFrom(DocumentPage page, DocumentOutline outline) =>
-      compose(page: page, elements: outline.elementsIn(page.startOffset, page.endOffset));
+      compose(
+        page: page,
+        elements: outline.elementsIn(page.startOffset, page.endOffset),
+      );
 
   /// Compose [page] from the [elements] intersecting it.
   ///
@@ -73,7 +76,10 @@ class PageComposer {
     final runes = page.text.runes.toList(growable: false);
     String slice(ReaderSpan span) {
       final safeStart = (span.start - page.startOffset).clamp(0, runes.length);
-      final safeEnd = (span.end - page.startOffset).clamp(safeStart, runes.length);
+      final safeEnd = (span.end - page.startOffset).clamp(
+        safeStart,
+        runes.length,
+      );
       return String.fromCharCodes(runes.sublist(safeStart, safeEnd));
     }
 
@@ -175,12 +181,14 @@ class PageComposer {
 
     // Stable sort by ordering key: reading order for text, sequence position for
     // placeholders.
-    final indexed = [
-      for (var index = 0; index < keyed.length; index++) (index, keyed[index]),
-    ]..sort((a, b) {
-      final byKey = a.$2.$1.compareTo(b.$2.$1);
-      return byKey != 0 ? byKey : a.$1.compareTo(b.$1);
-    });
+    final indexed =
+        [
+          for (var index = 0; index < keyed.length; index++)
+            (index, keyed[index]),
+        ]..sort((a, b) {
+          final byKey = a.$2.$1.compareTo(b.$2.$1);
+          return byKey != 0 ? byKey : a.$1.compareTo(b.$1);
+        });
     return List.unmodifiable(indexed.map((entry) => entry.$2.$2));
   }
 
@@ -344,7 +352,10 @@ class PageComposer {
     return parent is ListElement ? parent : null;
   }
 
-  BlockMarker _markerOf(ReaderElement element, Map<String, ReaderElement> byId) {
+  BlockMarker _markerOf(
+    ReaderElement element,
+    Map<String, ReaderElement> byId,
+  ) {
     if (element.kind != ReaderElementKind.listItem) return BlockMarker.none;
     final list = _listOf(element, byId);
     // An orphaned item still gets a bullet rather than losing its marker.

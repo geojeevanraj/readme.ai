@@ -19,7 +19,10 @@ void main() {
     });
 
     test('keeps chapter-qualified numbers intact', () {
-      expect(FigureLabel.fromCaption('Figure 4.2 Nested numbering'), 'Figure 4.2');
+      expect(
+        FigureLabel.fromCaption('Figure 4.2 Nested numbering'),
+        'Figure 4.2',
+      );
       expect(FigureLabel.fromCaption('Figure 10-3 Dash form'), 'Figure 10-3');
       expect(FigureLabel.fromCaption('Table 2.11.4 Deep'), 'Table 2.11.4');
     });
@@ -65,7 +68,10 @@ void main() {
         FigureLabel.resolve('Figure 5. Pipeline', fallback: 'Figure'),
         'Figure 5',
       );
-      expect(FigureLabel.resolve('No number here', fallback: 'Figure'), 'Figure');
+      expect(
+        FigureLabel.resolve('No number here', fallback: 'Figure'),
+        'Figure',
+      );
       expect(FigureLabel.resolve(null, fallback: 'Table'), 'Table');
     });
 

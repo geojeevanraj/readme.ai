@@ -41,15 +41,18 @@ void main() {
       }
     });
 
-    test('heading-to-section is not the sum of after-chapter and before-section', () {
-      final value = gap(ReaderElementKind.chapter, ReaderElementKind.section);
+    test(
+      'heading-to-section is not the sum of after-chapter and before-section',
+      () {
+        final value = gap(ReaderElementKind.chapter, ReaderElementKind.section);
 
-      expect(value, spacing.afterChapter * _fontSize);
-      expect(
-        value,
-        lessThan((spacing.afterChapter + spacing.beforeSection) * _fontSize),
-      );
-    });
+        expect(value, spacing.afterChapter * _fontSize);
+        expect(
+          value,
+          lessThan((spacing.afterChapter + spacing.beforeSection) * _fontSize),
+        );
+      },
+    );
 
     test('section-to-section uses one heading gap, not two', () {
       final value = gap(ReaderElementKind.section, ReaderElementKind.section);

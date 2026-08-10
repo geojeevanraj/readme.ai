@@ -67,7 +67,10 @@ void main() {
 
     expect(paginator.pageCount, greaterThanOrEqualTo(firstBatch));
     for (var i = 1; i < paginator.pageCount; i++) {
-      expect(paginator.pageAt(i).startOffset, paginator.pageAt(i - 1).endOffset);
+      expect(
+        paginator.pageAt(i).startOffset,
+        paginator.pageAt(i - 1).endOffset,
+      );
     }
   });
 

@@ -96,13 +96,16 @@ List<DocumentPage> _paginate(
 
 void main() {
   group('interface conformance', () {
-    test('is a PaginationSource and keeps StringPaginationSource available', () {
-      final structured = _structured(_plain);
+    test(
+      'is a PaginationSource and keeps StringPaginationSource available',
+      () {
+        final structured = _structured(_plain);
 
-      expect(structured, isA<PaginationSource>());
-      // The text-only implementation is retained, not replaced.
-      expect(StringPaginationSource(_plain), isA<PaginationSource>());
-    });
+        expect(structured, isA<PaginationSource>());
+        // The text-only implementation is retained, not replaced.
+        expect(StringPaginationSource(_plain), isA<PaginationSource>());
+      },
+    );
 
     test('exposes structure outside the PaginationSource interface', () {
       final structured = _structured(_plain);
@@ -202,7 +205,10 @@ void main() {
 
     test('an empty document behaves identically', () {
       expect(_structured('').length, StringPaginationSource('').length);
-      expect(_structured('').scalarAt(0), StringPaginationSource('').scalarAt(0));
+      expect(
+        _structured('').scalarAt(0),
+        StringPaginationSource('').scalarAt(0),
+      );
       expect(
         _structured('').scalarSubstring(0, 5),
         StringPaginationSource('').scalarSubstring(0, 5),
@@ -211,11 +217,7 @@ void main() {
   });
 
   group('pagination equivalence', () {
-    const sizes = <Size>[
-      Size(200, 120),
-      Size(320, 480),
-      Size(480, 90),
-    ];
+    const sizes = <Size>[Size(200, 120), Size(320, 480), Size(480, 90)];
 
     _texts.forEach((label, text) {
       test('page boundaries are identical for $label text', () {
@@ -275,7 +277,10 @@ void main() {
     });
 
     test('pagination is deterministic across repeated runs', () {
-      final first = _paginate(_structured(_mixed), pageSize: const Size(280, 160));
+      final first = _paginate(
+        _structured(_mixed),
+        pageSize: const Size(280, 160),
+      );
       final second = _paginate(
         _structured(_mixed),
         pageSize: const Size(280, 160),
@@ -312,8 +317,14 @@ void main() {
       expect(structured.pageCount, plain.pageCount);
       expect(structured.estimatedTotalPages, plain.estimatedTotalPages);
       for (var index = 0; index < plain.pageCount; index++) {
-        expect(structured.pageAt(index).startOffset, plain.pageAt(index).startOffset);
-        expect(structured.pageAt(index).endOffset, plain.pageAt(index).endOffset);
+        expect(
+          structured.pageAt(index).startOffset,
+          plain.pageAt(index).startOffset,
+        );
+        expect(
+          structured.pageAt(index).endOffset,
+          plain.pageAt(index).endOffset,
+        );
         expect(structured.pageAt(index).text, plain.pageAt(index).text);
       }
     });
@@ -394,7 +405,10 @@ void main() {
       expect(diagnostics.structuredPageRequests, 1);
       expect(diagnostics.structuredPageCacheHits, 1);
       expect(diagnostics.outlineLookups, 1);
-      expect(diagnostics.averageOutlineLookupMicroseconds, greaterThanOrEqualTo(0));
+      expect(
+        diagnostics.averageOutlineLookupMicroseconds,
+        greaterThanOrEqualTo(0),
+      );
     });
 
     test('report a miss when structure is absent', () {

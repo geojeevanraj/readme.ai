@@ -375,8 +375,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final span = element?.span;
     final text = _contentText;
     if (span != null && text != null) {
-      final selected = CharacterAnchor.substring(text, span.start, span.end)
-          .trim();
+      final selected = CharacterAnchor.substring(
+        text,
+        span.start,
+        span.end,
+      ).trim();
       if (selected.isNotEmpty) {
         _explainSelection(selected, span.start, span.end);
         return;
@@ -597,10 +600,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                 blocks: _composeBlocks(page),
                                 registry: _registry,
                                 explainLabel: l10n.explain,
-                                renderContext: _renderContext(
-                                  theme,
-                                  textStyle,
-                                ),
+                                renderContext: _renderContext(theme, textStyle),
                                 onExplain: (selected) =>
                                     _explainPageSelection(page, selected),
                               ),
