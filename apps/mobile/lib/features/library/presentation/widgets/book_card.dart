@@ -1,156 +1,173 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_semantics.dart';
+import '../../../../core/theme/app_tokens.dart';
+import '../../../../core/theme/app_typography.dart';
+import '../../../../l10n/generated/app_localizations.dart';
 import '../../../../shared/formatters/byte_formatter.dart';
 import '../../domain/book.dart';
 import '../../domain/book_status.dart';
 
-/// Responsive editorial card for a book in the user's library.
+/// A book in the library, as a row.
+///
+/// Rows rather than a grid of covers: these covers are generated placeholders,
+/// not real artwork, so they carry no recognition value at grid size. A row
+/// gives the title room to be read and leaves space for the state a reader
+/// actually needs — whether the book is ready, and what to do if it is not.
 class BookCard extends StatelessWidget {
-  const BookCard({required this.book, required this.onTap, super.key});
+  const BookCard({
+    required this.book,
+    required this.onTap,
+    this.onRetryProcessing,
+    super.key,
+  });
 
   final Book book;
   final VoidCallback onTap;
 
+  /// Invoked when a failed book's "Try again" is tapped.
+  final VoidCallback? onRetryProcessing;
+
   @override
   Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final horizontal = constraints.maxHeight < 250;
-            return horizontal
-                ? _HorizontalBook(book: book)
-                : _VerticalBook(book: book);
-          },
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
+
+    return Semantics(
+      button: true,
+      label: '${book.title}, ${book.status.label}',
+      child: ExcludeSemantics(
+        child: Material(
+          color: semantics.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: Radii.all(Radii.lg),
+            side: BorderSide(color: semantics.hairline),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(Space.md),
+              child: Column(
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 48,
+                        height: 66,
+                        child: BookCover(book: book, compact: true, hero: true),
+                      ),
+                      const SizedBox(width: Space.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              book.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: Space.xs),
+                            Text(
+                              '${_fileKind(book)} · ${formatBytes(book.fileSize)}',
+                              style: AppTypography.mono(
+                                theme.textTheme.bodySmall,
+                              ).copyWith(color: semantics.inkFaint),
+                            ),
+                            const SizedBox(height: Space.sm),
+                            StatusBadge(status: book.status),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: semantics.inkFaint,
+                      ),
+                    ],
+                  ),
+
+                  // While the backend is preparing the book there is nothing
+                  // to tap, so the row says so rather than looking broken.
+                  // Deliberately static text rather than an indeterminate bar:
+                  // the status is refreshed by polling every few seconds, and a
+                  // bar that animates forever on a list row is noise (and never
+                  // lets the frame scheduler go idle).
+                  if (book.status.isTransient) ...[
+                    const SizedBox(height: Space.sm),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        l10n.bookPreparingHint,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: semantics.inkMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // A failed book is recoverable: the file is already uploaded,
+                  // so processing can simply be re-run.
+                  if (book.status.hasFailed && onRetryProcessing != null) ...[
+                    const SizedBox(height: Space.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            l10n.bookFailedHint,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: semantics.inkMuted,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: onRetryProcessing,
+                          child: Text(l10n.bookRetryProcessing),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _VerticalBook extends StatelessWidget {
-  const _VerticalBook({required this.book});
-
-  final Book book;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 6,
-          child: SizedBox(
-            width: double.infinity,
-            child: _BookCover(book: book),
-          ),
-        ),
-        Expanded(
-          flex: 4,
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: _StatusBadge(status: book.status)),
-                    Icon(
-                      Icons.arrow_outward_rounded,
-                      size: 19,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Text(
-                  book.title,
-                  style: theme.textTheme.titleLarge,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${_fileKind(book)}  ·  ${formatBytes(book.fileSize)}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _HorizontalBook extends StatelessWidget {
-  const _HorizontalBook({required this.book});
-
-  final Book book;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        SizedBox(width: 124, child: _BookCover(book: book, compact: true)),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _StatusBadge(status: book.status),
-                const SizedBox(height: 14),
-                Text(
-                  book.title,
-                  style: theme.textTheme.titleLarge,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${_fileKind(book)}  ·  ${formatBytes(book.fileSize)}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: 16),
-          child: Icon(
-            Icons.arrow_forward_rounded,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _BookCover extends StatelessWidget {
-  const _BookCover({required this.book, this.compact = false});
+/// Generated cover for a book.
+///
+/// Marked as decorative for assistive technology: the initials and wordmark are
+/// derived from the title, so reading them aloud after the title would just be
+/// noise.
+///
+/// Pass [hero] to animate the cover between screens. Only one cover for a given
+/// book may opt in per screen — two Heroes with the same tag in one subtree is a
+/// framework assertion, which is exactly what happens when the same book appears
+/// both in the resume card and in the list below it.
+class BookCover extends StatelessWidget {
+  const BookCover({
+    required this.book,
+    this.compact = false,
+    this.hero = false,
+    super.key,
+  });
 
   final Book book;
   final bool compact;
+  final bool hero;
 
   @override
   Widget build(BuildContext context) {
-    final colors = _coverColors(book.title);
-    return Hero(
-      tag: 'book-cover-${book.id}',
+    final colors = AppColors.coverFor(book.title);
+
+    final cover = ClipRRect(
+      borderRadius: Radii.all(compact ? Radii.sm : Radii.md),
       child: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -159,120 +176,111 @@ class _BookCover extends StatelessWidget {
             colors: colors,
           ),
         ),
+        // A Stack (clipped by the ClipRRect above) rather than a Column: the
+        // cover has a fixed aspect box, and text that grows with the platform
+        // font-size setting must be allowed to run past the edge instead of
+        // throwing a layout overflow.
         child: Stack(
+          fit: StackFit.expand,
           children: [
             Positioned(
-              right: compact ? -34 : -24,
-              bottom: compact ? -28 : -34,
-              child: Container(
-                width: compact ? 96 : 150,
-                height: compact ? 96 : 150,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.15),
-                ),
-              ),
-            ),
-            Positioned(
-              left: compact ? 14 : 22,
-              top: compact ? 16 : 22,
-              right: compact ? 12 : 22,
+              left: compact ? Space.sm : Space.base,
+              right: compact ? Space.sm : Space.base,
+              bottom: compact ? Space.sm : Space.base,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.auto_stories_rounded,
-                    color: Colors.white.withValues(alpha: 0.94),
-                    size: compact ? 24 : 30,
+                  Text(
+                    _initials(book.title),
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontFamily: AppTypography.serifFamily,
+                      fontFamilyFallback: AppTypography.serifFallback,
+                      fontSize: compact ? 20 : 44,
+                      height: 1,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
                   ),
                   if (!compact) ...[
-                    const SizedBox(height: 30),
+                    const SizedBox(height: Space.sm),
                     Text(
-                      _initials(book.title),
-                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                        color: Colors.white,
-                        fontSize: 40,
+                      'README.AI',
+                      maxLines: 1,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.82),
+                        letterSpacing: 1.6,
                       ),
                     ),
                   ],
                 ],
               ),
             ),
-            Positioned(
-              left: compact ? 14 : 22,
-              bottom: compact ? 14 : 20,
-              child: Text(
-                'README.AI',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.8),
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
           ],
         ),
       ),
     );
+
+    return ExcludeSemantics(
+      child: hero ? Hero(tag: 'book-cover-${book.id}', child: cover) : cover,
+    );
   }
 }
 
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.status});
+/// Coloured pill describing where a book is in its lifecycle.
+class StatusBadge extends StatelessWidget {
+  const StatusBadge({required this.status, super.key});
 
   final BookStatus status;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final semantics = context.semantics;
+
     final (
       Color background,
       Color foreground,
       IconData icon,
     ) = switch (status) {
       BookStatus.ready => (
-        AppColors.mint.withValues(alpha: 0.55),
-        const Color(0xFF246145),
+        semantics.mossTint,
+        semantics.mossInk,
         Icons.check_circle_outline_rounded,
       ),
       BookStatus.failed => (
-        theme.colorScheme.errorContainer,
-        theme.colorScheme.onErrorContainer,
+        semantics.rustTint,
+        semantics.rustInk,
         Icons.error_outline_rounded,
       ),
-      BookStatus.processing || BookStatus.uploading => (
-        AppColors.apricot.withValues(alpha: 0.48),
-        const Color(0xFF78440A),
-        Icons.autorenew_rounded,
-      ),
-      BookStatus.uploaded => (
-        theme.colorScheme.primaryContainer,
-        theme.colorScheme.onPrimaryContainer,
-        Icons.cloud_done_outlined,
+      BookStatus.uploading || BookStatus.uploaded || BookStatus.processing => (
+        semantics.amberTint,
+        semantics.amberInk,
+        Icons.hourglass_top_rounded,
       ),
     };
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(9),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: foreground),
-            const SizedBox(width: 5),
-            Text(
-              status.label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: foreground,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Space.sm,
+        vertical: Space.xs,
+      ),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: Radii.all(Radii.sm),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: foreground),
+          const SizedBox(width: Space.xs),
+          Text(
+            status.label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: foreground),
+          ),
+        ],
       ),
     );
   }
@@ -292,15 +300,4 @@ String _initials(String title) {
       .take(2);
   final result = words.map((word) => word[0].toUpperCase()).join();
   return result.isEmpty ? 'R' : result;
-}
-
-List<Color> _coverColors(String title) {
-  const palettes = [
-    [Color(0xFF4D5FF7), Color(0xFF29369E)],
-    [Color(0xFFDF7A45), Color(0xFF8F3D42)],
-    [Color(0xFF237A68), Color(0xFF17483F)],
-    [Color(0xFF7655C6), Color(0xFF41307D)],
-    [Color(0xFF386C9B), Color(0xFF1D3C61)],
-  ];
-  return palettes[title.hashCode.abs() % palettes.length];
 }

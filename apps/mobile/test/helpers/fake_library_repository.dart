@@ -7,9 +7,16 @@ import 'package:readme_ai/features/library/domain/library_repository.dart';
 
 /// In-memory [LibraryRepository] for widget and unit tests.
 class FakeLibraryRepository implements LibraryRepository {
-  FakeLibraryRepository({List<Book>? initial}) : _books = [...?initial];
+  FakeLibraryRepository({
+    List<Book>? initial,
+    this.uploadStatus = BookStatus.ready,
+  }) : _books = [...?initial];
 
   final List<Book> _books;
+
+  /// Status given to a freshly uploaded book. Defaults to [BookStatus.ready]
+  /// so tests do not start the library's processing poll unless they mean to.
+  final BookStatus uploadStatus;
 
   /// When set, [listBooks] throws this.
   Object? listError;
@@ -21,6 +28,18 @@ class FakeLibraryRepository implements LibraryRepository {
   Completer<void>? releaseList;
 
   int listCalls = 0;
+  int retryProcessingCalls = 0;
+
+  /// Replace the stored books, e.g. to simulate the backend finishing
+  /// preparation between two polls.
+  void reset({required List<Book> initial}) {
+    _books
+      ..clear()
+      ..addAll(initial);
+  }
+
+  /// Progress fractions reported during the last upload.
+  final List<double> reportedProgress = [];
 
   @override
   Future<List<Book>> listBooks() async {
@@ -39,7 +58,16 @@ class FakeLibraryRepository implements LibraryRepository {
       _books.firstWhere((book) => book.id == id);
 
   @override
-  Future<Book> uploadBook(PickedBook file) async {
+  Future<Book> uploadBook(
+    PickedBook file, {
+    void Function(double fraction)? onProgress,
+  }) async {
+    onProgress?.call(0.5);
+    onProgress?.call(1);
+    reportedProgress
+      ..clear()
+      ..addAll([0.5, 1]);
+
     if (uploadError != null) {
       throw uploadError!;
     }
@@ -49,11 +77,19 @@ class FakeLibraryRepository implements LibraryRepository {
       originalFilename: file.filename,
       mimeType: file.mimeType ?? 'application/pdf',
       fileSize: file.size,
-      status: BookStatus.uploaded,
+      status: uploadStatus,
       uploadedAt: DateTime(2026),
     );
     _books.insert(0, book);
     return book;
+  }
+
+  @override
+  Future<void> retryProcessing(String id) async {
+    retryProcessingCalls++;
+    final index = _books.indexWhere((book) => book.id == id);
+    if (index == -1) return;
+    _books[index] = _books[index].copyWith(status: BookStatus.ready);
   }
 
   @override

@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:readme_ai/app.dart';
 import 'package:readme_ai/core/files/file_picker_service.dart';
+import 'package:readme_ai/core/preferences/preferences_service.dart';
+import 'package:readme_ai/core/state/retry_policy.dart';
 import 'package:readme_ai/features/auth/application/auth_providers.dart';
 import 'package:readme_ai/features/auth/domain/auth_repository.dart';
 import 'package:readme_ai/features/library/application/library_providers.dart';
@@ -9,6 +11,7 @@ import 'package:readme_ai/features/library/domain/library_repository.dart';
 
 import 'fake_file_picker.dart';
 import 'fake_library_repository.dart';
+import 'test_preferences.dart';
 
 /// Pump the full app with fakes injected for all external dependencies, so no
 /// platform services (Firebase, HTTP, native file picker) are touched.
@@ -24,7 +27,9 @@ Future<void> pumpApp(
 }) async {
   await tester.pumpWidget(
     ProviderScope(
+      retry: noAutomaticRetry,
       overrides: [
+        preferencesProvider.overrideWithValue(await testPreferences()),
         authRepositoryProvider.overrideWithValue(authRepository),
         libraryRepositoryProvider.overrideWithValue(
           libraryRepository ?? FakeLibraryRepository(),

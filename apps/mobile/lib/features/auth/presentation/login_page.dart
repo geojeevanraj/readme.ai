@@ -1,286 +1,275 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_semantics.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/theme/app_typography.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../application/auth_controller.dart';
 import '../domain/auth_exception.dart';
 
-/// Responsive sign-in experience for ReadMe.ai.
-class LoginPage extends ConsumerWidget {
+/// Sign-in.
+///
+/// The screen shows the product rather than describing it: a real sentence set
+/// in the reading face, with a phrase highlighted exactly as the reader would
+/// highlight it, and the answer underneath. Someone deciding whether to hand
+/// over a Google account can see what they get before they do it — which a
+/// feature list never achieves.
+///
+/// Sign-in failures appear inline next to the button that failed (and are still
+/// announced), because a snackbar that has already faded leaves a reader
+/// staring at a button that "did nothing".
+class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends ConsumerState<LoginPage> {
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
     final state = ref.watch(authControllerProvider);
 
     ref.listen(authControllerProvider, (previous, next) {
       if (next case AsyncError(:final error)) {
-        _showError(context, l10n, error);
+        if (error is AuthException && error.isCancellation) return;
+        setState(() {
+          _error = error is AuthException
+              ? error.displayMessage
+              : l10n.signInError;
+        });
+      }
+      if (next is AsyncLoading && _error != null) {
+        setState(() => _error = null);
       }
     });
 
     return Scaffold(
-      body: Stack(
-        children: [
-          const Positioned(
-            top: -130,
-            right: -90,
-            child: _Glow(color: AppColors.apricot, size: 320),
-          ),
-          const Positioned(
-            bottom: -160,
-            left: -100,
-            child: _Glow(color: AppColors.lavender, size: 380),
-          ),
-          SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final wide = constraints.maxWidth >= 860;
-                return SingleChildScrollView(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: wide ? 56 : 24,
-                    vertical: 24,
-                  ),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: constraints.maxHeight - 48,
-                    ),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1160),
-                        child: wide
-                            ? Row(
-                                children: [
-                                  const Expanded(flex: 6, child: _HeroCopy()),
-                                  const SizedBox(width: 72),
-                                  Expanded(
-                                    flex: 4,
-                                    child: _SignInCard(
-                                      isLoading: state.isLoading,
-                                      onPressed: state.isLoading
-                                          ? null
-                                          : () => ref
-                                                .read(
-                                                  authControllerProvider
-                                                      .notifier,
-                                                )
-                                                .signInWithGoogle(),
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const _HeroCopy(compact: true),
-                                  const SizedBox(height: 36),
-                                  _SignInCard(
-                                    isLoading: state.isLoading,
-                                    onPressed: state.isLoading
-                                        ? null
-                                        : () => ref
-                                              .read(
-                                                authControllerProvider.notifier,
-                                              )
-                                              .signInWithGoogle(),
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ),
-                  ),
-                );
-              },
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: Space.lg,
+              vertical: Space.xl,
             ),
-          ),
-        ],
-      ),
-    );
-  }
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _BrandMark(),
+                  const SizedBox(height: Space.xxl),
+                  Text(
+                    l10n.loginHeadline,
+                    style: TextStyle(
+                      fontFamily: AppTypography.serifFamily,
+                      fontFamilyFallback: AppTypography.serifFallback,
+                      fontSize: 32,
+                      height: 1.18,
+                      letterSpacing: -0.6,
+                      fontWeight: FontWeight.w600,
+                      color: semantics.ink,
+                    ),
+                  ),
+                  const SizedBox(height: Space.xxl),
+                  const _ExplainDemo(),
+                  const SizedBox(height: Space.xxl),
 
-  void _showError(BuildContext context, AppLocalizations l10n, Object error) {
-    if (error is AuthException && error.isCancellation) return;
-    final message = error is AuthException
-        ? error.displayMessage
-        : l10n.signInError;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
-  }
-}
+                  if (_error != null) ...[
+                    _SignInError(message: _error!),
+                    const SizedBox(height: Space.md),
+                  ],
 
-class _HeroCopy extends StatelessWidget {
-  const _HeroCopy({this.compact = false});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return TweenAnimationBuilder<double>(
-      duration: const Duration(milliseconds: 650),
-      curve: Curves.easeOutCubic,
-      tween: Tween(begin: 0, end: 1),
-      builder: (context, value, child) => Opacity(
-        opacity: value,
-        child: Transform.translate(
-          offset: Offset(0, 18 * (1 - value)),
-          child: child,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: compact
-            ? CrossAxisAlignment.center
-            : CrossAxisAlignment.start,
-        children: [
-          const _BrandMark(),
-          SizedBox(height: compact ? 28 : 48),
-          Text(
-            'Read less.\nUnderstand more.',
-            textAlign: compact ? TextAlign.center : TextAlign.left,
-            style:
-                (compact
-                        ? theme.textTheme.displaySmall
-                        : theme.textTheme.displayLarge)
-                    ?.copyWith(fontSize: compact ? 44 : 70),
-          ),
-          const SizedBox(height: 20),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: Text(
-              'Your calm, AI-powered reading space. Turn difficult passages '
-              'into clear ideas without leaving the page.',
-              textAlign: compact ? TextAlign.center : TextAlign.left,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                height: 1.55,
-                fontWeight: FontWeight.w500,
+                  FilledButton.icon(
+                    onPressed: state.isLoading
+                        ? null
+                        : () => ref
+                              .read(authControllerProvider.notifier)
+                              .signInWithGoogle(),
+                    icon: state.isLoading
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.colorScheme.onPrimary,
+                            ),
+                          )
+                        : const Icon(Icons.login_rounded, size: 18),
+                    label: Text(
+                      _error == null ? l10n.signInWithGoogle : l10n.loginRetry,
+                    ),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                  ),
+                  const SizedBox(height: Space.md),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.lock_outline_rounded,
+                        size: 15,
+                        color: semantics.inkFaint,
+                      ),
+                      const SizedBox(width: Space.sm),
+                      Expanded(
+                        child: Text(
+                          l10n.loginPrivacy,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: semantics.inkFaint,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
-          if (!compact) ...[
-            const SizedBox(height: 40),
-            const Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _FeaturePill(
-                  icon: Icons.auto_awesome,
-                  label: 'Explain in context',
-                ),
-                _FeaturePill(
-                  icon: Icons.bookmark_outline,
-                  label: 'Keep your place',
-                ),
-                _FeaturePill(icon: Icons.tune, label: 'Read your way'),
-              ],
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
 }
 
-class _SignInCard extends StatelessWidget {
-  const _SignInCard({required this.isLoading, required this.onPressed});
+/// A miniature, non-interactive rehearsal of the core interaction.
+class _ExplainDemo extends StatelessWidget {
+  const _ExplainDemo();
 
-  final bool isLoading;
-  final VoidCallback? onPressed;
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
+
+    final passage = l10n.loginDemoPassage;
+    final highlight = l10n.loginDemoHighlight;
+    final start = passage.indexOf(highlight);
+    final end = start == -1 ? -1 : start + highlight.length;
+
+    final readingStyle = AppTypography.reading(
+      fontSize: 18,
+      lineHeight: 1.55,
+      color: semantics.ink,
+      serif: true,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          l10n.loginDemoLabel.toUpperCase(),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: semantics.inkMuted,
+          ),
+        ),
+        const SizedBox(height: Space.md),
+        // The passage, with the selection washed exactly as in the reader.
+        Text.rich(
+          start == -1
+              ? TextSpan(text: passage, style: readingStyle)
+              : TextSpan(
+                  style: readingStyle,
+                  children: [
+                    TextSpan(text: passage.substring(0, start)),
+                    TextSpan(
+                      text: highlight,
+                      style: TextStyle(
+                        backgroundColor: semantics.explainHighlight,
+                      ),
+                    ),
+                    TextSpan(text: passage.substring(end)),
+                  ],
+                ),
+        ),
+        const SizedBox(height: Space.base),
+        // The answer, in the same shape as the real explanation sheet.
+        Container(
+          padding: const EdgeInsets.all(Space.md),
+          decoration: BoxDecoration(
+            color: semantics.surface,
+            borderRadius: Radii.all(Radii.lg),
+            border: Border.all(color: semantics.hairline),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.auto_awesome_rounded,
+                size: 18,
+                color: semantics.accent,
+              ),
+              const SizedBox(width: Space.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '“$highlight”',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    const SizedBox(height: Space.xs),
+                    Text(
+                      l10n.loginDemoAnswer,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: semantics.inkMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SignInError extends StatelessWidget {
+  const _SignInError({required this.message});
+
+  final String message;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final l10n = AppLocalizations.of(context);
-    return TweenAnimationBuilder<double>(
-      duration: const Duration(milliseconds: 800),
-      curve: Curves.easeOutCubic,
-      tween: Tween(begin: 0, end: 1),
-      builder: (context, value, child) => Opacity(
-        opacity: value,
-        child: Transform.translate(
-          offset: Offset(0, 28 * (1 - value)),
-          child: child,
-        ),
-      ),
+    final semantics = context.semantics;
+
+    return Semantics(
+      liveRegion: true,
       child: Container(
-        width: double.infinity,
-        constraints: const BoxConstraints(maxWidth: 440),
-        padding: const EdgeInsets.all(30),
+        padding: const EdgeInsets.all(Space.md),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface.withValues(alpha: 0.94),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.ink.withValues(alpha: 0.08),
-              blurRadius: 36,
-              offset: const Offset(0, 18),
-            ),
-          ],
+          color: semantics.rustTint,
+          borderRadius: Radii.all(Radii.md),
+          border: Border.all(color: semantics.rust),
         ),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(15),
-              ),
-              child: Icon(
-                Icons.waving_hand_outlined,
-                color: theme.colorScheme.primary,
-              ),
+            Icon(
+              Icons.error_outline_rounded,
+              size: 18,
+              color: semantics.rustInk,
             ),
-            const SizedBox(height: 24),
-            Text('Welcome back', style: theme.textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            Text(
-              l10n.loginSubtitle,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 30),
-            FilledButton.icon(
-              onPressed: onPressed,
-              icon: isLoading
-                  ? SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: theme.colorScheme.onPrimary,
-                      ),
-                    )
-                  : const Icon(Icons.login_rounded),
-              label: Text(l10n.signInWithGoogle),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(56),
-              ),
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Icon(
-                  Icons.lock_outline_rounded,
-                  size: 16,
-                  color: theme.colorScheme.onSurfaceVariant,
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: Text(
+                message,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: semantics.rustInk,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Private by design. Your library stays yours.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),
@@ -294,69 +283,33 @@ class _BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
+    final semantics = context.semantics;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 46,
-          height: 46,
+          width: 34,
+          height: 34,
           decoration: BoxDecoration(
-            color: AppColors.ink,
-            borderRadius: BorderRadius.circular(14),
+            color: semantics.accent,
+            borderRadius: Radii.all(Radii.sm),
           ),
-          child: const Icon(Icons.auto_stories_rounded, color: Colors.white),
+          child: Icon(
+            Icons.auto_stories_rounded,
+            size: 18,
+            color: Theme.of(context).colorScheme.onPrimary,
+          ),
         ),
-        const SizedBox(width: 12),
-        Text('ReadMe.ai', style: theme.textTheme.titleLarge),
+        const SizedBox(width: Space.md),
+        Text(
+          l10n.appTitle,
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(letterSpacing: -0.2),
+        ),
       ],
     );
   }
-}
-
-class _FeaturePill extends StatelessWidget {
-  const _FeaturePill({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: theme.colorScheme.primary),
-          const SizedBox(width: 8),
-          Text(label, style: theme.textTheme.labelLarge),
-        ],
-      ),
-    );
-  }
-}
-
-class _Glow extends StatelessWidget {
-  const _Glow({required this.color, required this.size});
-
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => IgnorePointer(
-    child: Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color.withValues(alpha: 0.34),
-      ),
-    ),
-  );
 }

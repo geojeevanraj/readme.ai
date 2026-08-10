@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:readme_ai/core/state/retry_policy.dart';
 import 'package:readme_ai/features/explanation/application/explanation_providers.dart';
 import 'package:readme_ai/features/explanation/domain/explanation.dart';
 import 'package:readme_ai/features/explanation/domain/prerequisite.dart';
@@ -25,6 +26,7 @@ Future<void> _pumpSheet(
 ) async {
   await tester.pumpWidget(
     ProviderScope(
+      retry: noAutomaticRetry,
       overrides: [explanationRepositoryProvider.overrideWithValue(repository)],
       child: const MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -117,13 +119,17 @@ void main() {
     expect(find.text('Prerequisites'), findsNothing);
   });
 
-  testWidgets('shows a loading indicator while fetching', (tester) async {
+  testWidgets('shows a shaped placeholder while fetching', (tester) async {
     final repository = FakeExplanationRepository()..gate = Completer<void>();
 
     await _pumpSheet(tester, repository);
     await tester.pump();
 
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    // A skeleton, not a spinner: the reader can see the shape of the answer
+    // that is coming, and the sheet does not resize when it lands.
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('a small portable computer'), findsNothing);
+
     repository.gate!.complete();
     await tester.pumpAndSettle();
     expect(find.text('a small portable computer'), findsOneWidget);

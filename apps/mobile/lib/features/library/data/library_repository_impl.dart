@@ -31,15 +31,28 @@ class LibraryRepositoryImpl implements LibraryRepository {
   }
 
   @override
-  Future<Book> uploadBook(PickedBook file) async {
+  Future<Book> uploadBook(
+    PickedBook file, {
+    void Function(double fraction)? onProgress,
+  }) async {
     final formData = FormData.fromMap({
       'file': MultipartFile.fromBytes(file.bytes, filename: file.filename),
     });
     final response = await _dio.post<Map<String, dynamic>>(
       _basePath,
       data: formData,
+      onSendProgress: onProgress == null
+          ? null
+          : (sent, total) {
+              if (total > 0) onProgress(sent / total);
+            },
     );
     return BookDto.fromJson(response.data!).toDomain();
+  }
+
+  @override
+  Future<void> retryProcessing(String id) async {
+    await _dio.post<void>('$_basePath/$id/processing');
   }
 
   @override

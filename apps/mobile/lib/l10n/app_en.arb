@@ -146,5 +146,281 @@
   "prerequisites": "Prerequisites",
   "@prerequisites": {
     "description": "Header for the collapsible list of prerequisite concepts."
+  },
+  "readerPercentRead": "{percent}% read",
+  "@readerPercentRead": {
+    "description": "Reading progress shown in the reader's footer.",
+    "placeholders": {
+      "percent": { "type": "int" }
+    }
+  },
+  "readerMinutesLeft": "{minutes} min left",
+  "@readerMinutesLeft": {
+    "description": "Estimated remaining reading time in the reader's footer.",
+    "placeholders": {
+      "minutes": { "type": "int" }
+    }
+  },
+  "readerAlmostDone": "Almost done",
+  "@readerAlmostDone": {
+    "description": "Shown instead of a minute estimate when under a minute remains."
+  },
+  "readerFinished": "Finished",
+  "@readerFinished": {
+    "description": "Shown in the reader footer when the book has been read to the end."
+  },
+  "readerPosition": "Reading position",
+  "@readerPosition": {
+    "description": "Accessibility label for the slider that scrubs through the book."
+  },
+  "readerUnsupportedFormatDetail": "Text files are fully supported today. PDF reading is coming next.",
+  "@readerUnsupportedFormatDetail": {
+    "description": "Explains which formats work while PDF rendering is unavailable."
+  },
+  "readerExplainHintTitle": "Select any word or passage",
+  "@readerExplainHintTitle": {
+    "description": "Title of the one-time coach mark teaching the Explain gesture."
+  },
+  "readerExplainHintBody": "Then choose Explain to get it in plain language, in context.",
+  "@readerExplainHintBody": {
+    "description": "Body of the one-time coach mark teaching the Explain gesture."
+  },
+  "readerExplainHintDismiss": "Got it",
+  "@readerExplainHintDismiss": {
+    "description": "Dismiss action on the one-time Explain coach mark."
+  },
+  "readerAppearance": "Appearance",
+  "@readerAppearance": {
+    "description": "Group label for the reader's paper/sepia/night options."
+  },
+  "readerAppearancePaper": "Paper",
+  "@readerAppearancePaper": {
+    "description": "Light reading theme option."
+  },
+  "readerAppearanceSepia": "Sepia",
+  "@readerAppearanceSepia": {
+    "description": "Warm, low-blue reading theme option."
+  },
+  "readerAppearanceNight": "Night",
+  "@readerAppearanceNight": {
+    "description": "Dark reading theme option."
+  },
+  "readerTextSize": "Text size",
+  "@readerTextSize": {
+    "description": "Label for the reader's font-size control."
+  },
+  "readerLineSpacing": "Line spacing",
+  "@readerLineSpacing": {
+    "description": "Label for the reader's line-height control."
+  },
+  "readerTypeface": "Typeface",
+  "@readerTypeface": {
+    "description": "Label for the reader's font-family control."
+  },
+  "readerTypefaceSerif": "Serif",
+  "@readerTypefaceSerif": {
+    "description": "Serif reading face option."
+  },
+  "readerTypefaceSans": "Sans",
+  "@readerTypefaceSans": {
+    "description": "Sans-serif reading face option."
+  },
+  "readerPreviewSentence": "Reading is thinking with someone else's mind.",
+  "@readerPreviewSentence": {
+    "description": "Sample sentence shown in the reader settings sheet so typography changes are visible immediately."
+  },
+  "readerSettingsFootnote": "Saved for next time you read.",
+  "@readerSettingsFootnote": {
+    "description": "Reassurance that reader typography settings persist across launches."
+  },
+  "increaseLabel": "Increase {label}",
+  "@increaseLabel": {
+    "description": "Tooltip for a stepper's increment button.",
+    "placeholders": {
+      "label": { "type": "String" }
+    }
+  },
+  "decreaseLabel": "Decrease {label}",
+  "@decreaseLabel": {
+    "description": "Tooltip for a stepper's decrement button.",
+    "placeholders": {
+      "label": { "type": "String" }
+    }
+  },
+  "explanationSave": "Save",
+  "@explanationSave": {
+    "description": "Action that saves the explained passage as a bookmark."
+  },
+  "explanationSaved": "Saved to bookmarks",
+  "@explanationSaved": {
+    "description": "Confirmation shown after saving an explained passage."
+  },
+  "explanationInContext": "In this context",
+  "@explanationInContext": {
+    "description": "Section label for the contextual explanation body."
+  },
+  "explanationSelectionWord": "Word",
+  "@explanationSelectionWord": {
+    "description": "Badge shown when the selection was classified as a single word."
+  },
+  "explanationSelectionSentence": "Sentence",
+  "@explanationSelectionSentence": {
+    "description": "Badge shown when the selection was classified as a sentence."
+  },
+  "explanationSelectionPassage": "Passage",
+  "@explanationSelectionPassage": {
+    "description": "Badge shown when the selection was classified as a paragraph."
+  },
+  "prerequisitesSubtitle": "Ideas that make this easier",
+  "@prerequisitesSubtitle": {
+    "description": "Subtitle for the prerequisites section of the explanation sheet."
+  },
+  "bookmarksEmptyTitle": "No saved places yet",
+  "@bookmarksEmptyTitle": {
+    "description": "Headline of the bookmarks sheet empty state."
+  },
+  "bookmarksEmptyMessage": "Tap the bookmark icon while reading, or save an explanation, to keep your place.",
+  "@bookmarksEmptyMessage": {
+    "description": "Body of the bookmarks sheet empty state."
+  },
+  "bookmarksLoadError": "Couldn't load your bookmarks.",
+  "@bookmarksLoadError": {
+    "description": "Shown when the bookmark list fails to load."
+  },
+  "bookmarkAt": "At {percent}%",
+  "@bookmarkAt": {
+    "description": "Position label for a bookmark in the list.",
+    "placeholders": {
+      "percent": { "type": "int" }
+    }
+  },
+  "bookmarkDeleted": "Bookmark removed",
+  "@bookmarkDeleted": {
+    "description": "Confirmation shown after deleting a bookmark."
+  },
+  "undo": "Undo",
+  "@undo": {
+    "description": "Generic undo action label."
+  },
+  "connectionHint": "Check your connection and try again.",
+  "@connectionHint": {
+    "description": "Recovery hint shown with network error states."
+  },
+  "libraryAllBooks": "All books",
+  "@libraryAllBooks": {
+    "description": "Section heading above the full list of books."
+  },
+  "libraryBookCount": "{count, plural, =0{No books} =1{1 book} other{{count} books}}",
+  "@libraryBookCount": {
+    "description": "Count of books in the library.",
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "librarySearchHint": "Search your library",
+  "@librarySearchHint": {
+    "description": "Placeholder in the library search field."
+  },
+  "libraryContinueReading": "Continue reading",
+  "@libraryContinueReading": {
+    "description": "Label on the resume card when the book is already started."
+  },
+  "libraryStartReading": "Start reading",
+  "@libraryStartReading": {
+    "description": "Label on the resume card when the book has not been opened yet."
+  },
+  "libraryResume": "Resume",
+  "@libraryResume": {
+    "description": "Action that reopens a book at the saved position."
+  },
+  "libraryNotStarted": "You haven't opened this one yet.",
+  "@libraryNotStarted": {
+    "description": "Shown on the resume card for a book with no saved progress."
+  },
+  "libraryKeepGoing": "Pick up where you left off",
+  "@libraryKeepGoing": {
+    "description": "Fallback subtitle when no time estimate can be calculated."
+  },
+  "libraryFormatHint": "Text files read straight away. PDF and EPUB upload now; reading them is coming.",
+  "@libraryFormatHint": {
+    "description": "Sets expectations about supported formats before the reader picks a file."
+  },
+  "libraryNoResults": "Nothing matches “{query}”",
+  "@libraryNoResults": {
+    "description": "Shown when a library search returns no books.",
+    "placeholders": {
+      "query": { "type": "String" }
+    }
+  },
+  "libraryNoResultsHint": "Try another title or file name.",
+  "@libraryNoResultsHint": {
+    "description": "Recovery hint for an empty library search."
+  },
+  "uploadingPercent": "Uploading… {percent}%",
+  "@uploadingPercent": {
+    "description": "Upload progress with the percentage of bytes sent.",
+    "placeholders": {
+      "percent": { "type": "int" }
+    }
+  },
+  "uploadPreparing": "Preparing your book…",
+  "@uploadPreparing": {
+    "description": "Shown once the file has been sent and the server is working."
+  },
+  "uploadFailedTitle": "Upload didn't finish",
+  "@uploadFailedTitle": {
+    "description": "Headline of the failed-upload card."
+  },
+  "uploadDismiss": "Dismiss",
+  "@uploadDismiss": {
+    "description": "Discards a failed upload without retrying."
+  },
+  "bookPreparingHint": "Getting this book ready to read — this usually takes a moment.",
+  "@bookPreparingHint": {
+    "description": "Explains the processing state on a book row."
+  },
+  "bookFailedHint": "We couldn't prepare this book.",
+  "@bookFailedHint": {
+    "description": "Explains the failed state on a book row."
+  },
+  "bookRetryProcessing": "Try again",
+  "@bookRetryProcessing": {
+    "description": "Re-runs processing for a book that failed to prepare."
+  },
+  "bookNotReadyYet": "Ready to read in a moment",
+  "@bookNotReadyYet": {
+    "description": "Replaces the Read action while a book is still being prepared."
+  },
+  "bookAboutFile": "About this file",
+  "@bookAboutFile": {
+    "description": "Section heading above a book's file metadata."
+  },
+  "loginHeadline": "Understand books,\nnot just read them.",
+  "@loginHeadline": {
+    "description": "Headline on the sign-in screen."
+  },
+  "loginDemoLabel": "Select anything confusing",
+  "@loginDemoLabel": {
+    "description": "Caption above the miniature demonstration of the Explain interaction."
+  },
+  "loginDemoPassage": "The market's invisible hand allocates resources without any central direction.",
+  "@loginDemoPassage": {
+    "description": "Sample sentence in the sign-in demonstration."
+  },
+  "loginDemoHighlight": "invisible hand",
+  "@loginDemoHighlight": {
+    "description": "The phrase highlighted inside loginDemoPassage. Must appear verbatim in loginDemoPassage."
+  },
+  "loginDemoAnswer": "People acting in their own interest can still produce an outcome that suits everyone — nobody is coordinating it.",
+  "@loginDemoAnswer": {
+    "description": "The AI answer shown in the sign-in demonstration."
+  },
+  "loginPrivacy": "Your library stays yours. We never share what you read.",
+  "@loginPrivacy": {
+    "description": "Privacy reassurance beneath the sign-in button."
+  },
+  "loginRetry": "Try signing in again",
+  "@loginRetry": {
+    "description": "Action shown with an inline sign-in error."
   }
 }

@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:readme_ai/features/auth/domain/auth_user.dart';
 import 'package:readme_ai/features/auth/presentation/login_page.dart';
@@ -41,6 +40,10 @@ void main() {
       await pumpApp(tester, authRepository: repository);
       expect(find.byType(LoginPage), findsOneWidget);
 
+      // The sign-in screen scrolls on short viewports, so bring the button
+      // into view the way a reader would before tapping it.
+      await tester.ensureVisible(find.text('Sign in with Google'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Sign in with Google'));
       await tester.pumpAndSettle();
 
@@ -58,7 +61,7 @@ void main() {
       await pumpApp(tester, authRepository: repository);
       expect(find.byType(LibraryScreen), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.logout));
+      await tester.tap(find.byTooltip('Sign out'));
       await tester.pumpAndSettle();
 
       expect(find.byType(LoginPage), findsOneWidget);

@@ -14,7 +14,17 @@ abstract interface class LibraryRepository {
   Future<Book> getBook(String id);
 
   /// Upload a picked file and return the created book.
-  Future<Book> uploadBook(PickedBook file);
+  ///
+  /// [onProgress] receives the fraction sent (0–1) so the UI can show real
+  /// upload progress instead of an indeterminate spinner. It is called on the
+  /// platform thread as bytes go out, and may be called many times.
+  Future<Book> uploadBook(
+    PickedBook file, {
+    void Function(double fraction)? onProgress,
+  });
+
+  /// Ask the backend to re-run processing for a book that failed.
+  Future<void> retryProcessing(String id);
 
   /// Delete a book by id.
   Future<void> deleteBook(String id);

@@ -1,10 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/app_colors.dart';
+import '../../../core/preferences/preferences_service.dart';
+import '../../../core/theme/app_semantics.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/theme/app_typography.dart';
+import '../../../core/theme/appearance_controller.dart';
+import '../../../core/theme/reading_palette.dart';
 import '../../../l10n/generated/app_localizations.dart';
+import '../../../shared/formatters/reading_time.dart';
 import '../../explanation/presentation/explanation_sheet.dart';
 import '../application/reader_controller.dart';
 import '../application/reader_providers.dart';
@@ -17,6 +24,12 @@ import 'widgets/explainable_text.dart';
 import 'widgets/reader_settings_sheet.dart';
 
 /// Immersive, API-backed reader with contextual AI assistance.
+///
+/// The page is the interface. Chrome (title bar, controls) is transient: it
+/// hides when the reader scrolls forward, returns when they scroll back, and
+/// can be toggled with a tap. What remains at all times is a single quiet
+/// footer line — percentage read and minutes left — because "where am I and how
+/// much is left" is the one question a reader asks constantly.
 class ReaderScreen extends ConsumerStatefulWidget {
   const ReaderScreen({required this.bookId, super.key});
 
@@ -29,10 +42,25 @@ class ReaderScreen extends ConsumerStatefulWidget {
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   final ScrollController _scrollController = ScrollController();
   final Stopwatch _sessionStopwatch = Stopwatch()..start();
+
   Timer? _saveDebounce;
   bool _restored = false;
+  bool _chromeVisible = true;
+  bool _showExplainHint = false;
   double _progress = 0;
   int _characterCount = 0;
+
+  /// Range of the passage most recently sent for explanation, kept highlighted.
+  int? _explainedStart;
+  int? _explainedEnd;
+
+  @override
+  void initState() {
+    super.initState();
+    final prefs = ref.read(preferencesProvider);
+    _showExplainHint =
+        !(prefs.readBool(PreferenceKeys.explainHintSeen) ?? false);
+  }
 
   @override
   void dispose() {
@@ -41,6 +69,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     _scrollController.dispose();
     super.dispose();
   }
+
+  // ------------------------------------------------------------- position ---
 
   double get _scrollFraction {
     if (!_scrollController.hasClients) return 0;
@@ -54,7 +84,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   void _onScroll() {
     final fraction = _scrollFraction;
-    setState(() => _progress = fraction);
+    if (fraction != _progress) {
+      setState(() => _progress = fraction);
+    }
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 1200), _persistPosition);
   }
@@ -90,16 +122,49 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     });
   }
 
+  void _seekTo(double fraction) {
+    if (!_scrollController.hasClients) return;
+    _scrollController.jumpTo(
+      fraction.clamp(0.0, 1.0) * _scrollController.position.maxScrollExtent,
+    );
+    setState(() => _progress = fraction);
+  }
+
   void _jumpToAnchor(String anchor) {
     final offset = int.tryParse(anchor) ?? 0;
     if (_characterCount == 0 || !_scrollController.hasClients) return;
     final fraction = (offset / _characterCount).clamp(0.0, 1.0);
     _scrollController.animateTo(
       fraction * _scrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 360),
-      curve: Curves.easeOutCubic,
+      duration: Motion.of(context, Motion.slow),
+      curve: Motion.standard,
     );
   }
+
+  // ---------------------------------------------------------------- chrome ---
+
+  void _toggleChrome() => setState(() => _chromeVisible = !_chromeVisible);
+
+  bool _handleUserScroll(UserScrollNotification notification) {
+    switch (notification.direction) {
+      case ScrollDirection.forward:
+        if (!_chromeVisible) setState(() => _chromeVisible = true);
+      case ScrollDirection.reverse:
+        if (_chromeVisible) setState(() => _chromeVisible = false);
+      case ScrollDirection.idle:
+        break;
+    }
+    return false;
+  }
+
+  void _dismissExplainHint() {
+    ref
+        .read(preferencesProvider)
+        .writeBool(PreferenceKeys.explainHintSeen, value: true);
+    setState(() => _showExplainHint = false);
+  }
+
+  // --------------------------------------------------------------- actions ---
 
   Future<void> _addBookmark() async {
     final l10n = AppLocalizations.of(context);
@@ -108,12 +173,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     await ref
         .read(readerControllerProvider)
         .addBookmark(widget.bookId, anchor: offset.toString());
+    if (!mounted) return;
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text(l10n.bookmarkAdded),
-          action: SnackBarAction(label: 'View', onPressed: _openBookmarks),
+          action: SnackBarAction(
+            label: l10n.bookmarks,
+            onPressed: _openBookmarks,
+          ),
         ),
       );
   }
@@ -121,10 +190,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void _openBookmarks() {
     showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (_) => BookmarksSheet(
         bookId: widget.bookId,
+        characterCount: _characterCount,
         onJump: (Bookmark bookmark) {
           Navigator.of(context).pop();
           _jumpToAnchor(bookmark.anchor);
@@ -136,165 +206,269 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void _openSettings() {
     showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
       builder: (_) => const ReaderSettingsSheet(),
     );
   }
 
   void _explainSelection(String text, int start, int end) {
+    setState(() {
+      _explainedStart = start;
+      _explainedEnd = end;
+      if (_showExplainHint) _dismissExplainHint();
+    });
+
     final args = (
       bookId: widget.bookId,
       anchor: start.toString(),
       endAnchor: end.toString(),
       selectedText: text,
     );
+
     showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
       isScrollControlled: true,
-      builder: (_) => ExplanationSheet(args: args),
+      useSafeArea: true,
+      // A light barrier keeps the highlighted passage readable above the sheet:
+      // the answer and the question stay on screen together.
+      barrierColor: context.semantics.shadow.withValues(alpha: 0.16),
+      builder: (_) => ExplanationSheet(
+        args: args,
+        onSave: () => _saveExplanation(start, text),
+      ),
     );
   }
 
+  Future<void> _saveExplanation(int anchor, String selectedText) async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    await ref
+        .read(readerControllerProvider)
+        .addBookmark(
+          widget.bookId,
+          anchor: anchor.toString(),
+          label: selectedText,
+        );
+    if (!mounted) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(l10n.explanationSaved)));
+  }
+
+  // ----------------------------------------------------------------- build ---
+
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
+    final palette = ref.watch(readingPaletteProvider);
     final contentState = ref.watch(bookContentProvider(widget.bookId));
-    final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 68,
-        backgroundColor: theme.colorScheme.surface,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              contentState.value?.title ?? l10n.appTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            Text(
-              '${(_progress * 100).round()}% complete',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: l10n.bookmarkThisPosition,
-            icon: const Icon(Icons.bookmark_add_outlined),
-            onPressed: contentState.hasValue ? _addBookmark : null,
-          ),
-          IconButton(
-            tooltip: l10n.bookmarks,
-            icon: const Icon(Icons.bookmarks_outlined),
-            onPressed: _openBookmarks,
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: IconButton(
-              tooltip: l10n.readerSettings,
-              icon: const Icon(Icons.tune_rounded),
-              onPressed: _openSettings,
-            ),
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(3),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: _progress.clamp(0.0, 1.0)),
-            duration: const Duration(milliseconds: 180),
-            builder: (context, value, _) =>
-                LinearProgressIndicator(minHeight: 3, value: value),
-          ),
-        ),
-      ),
+      backgroundColor: palette.canvas,
       body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
+        duration: Motion.of(context, Motion.base),
         child: switch (contentState) {
-          AsyncData(:final value) => _buildContent(context, value),
-          AsyncError() => _ReaderError(
+          AsyncValue(hasValue: true, :final value?) => _buildReader(
+            context,
+            palette,
+            value,
+          ),
+          AsyncValue(hasError: true) => _ReaderMessage(
+            key: const ValueKey('reader-error'),
+            icon: Icons.cloud_off_rounded,
+            title: AppLocalizations.of(context).libraryLoadError,
+            message: AppLocalizations.of(context).connectionHint,
             onRetry: () => ref.invalidate(bookContentProvider(widget.bookId)),
           ),
-          _ => const Center(child: CircularProgressIndicator()),
+          _ => const _ReaderLoading(key: ValueKey('reader-loading')),
         },
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context, BookContent content) {
+  Widget _buildReader(
+    BuildContext context,
+    ReadingPalette palette,
+    BookContent content,
+  ) {
     final l10n = AppLocalizations.of(context);
+
     if (content.format != ContentFormat.text || content.text == null) {
-      return _UnsupportedView(
-        key: const ValueKey('unsupported-reader'),
-        message: l10n.readerUnsupportedFormat,
+      return _ReaderMessage(
+        key: const ValueKey('reader-unsupported'),
+        icon: Icons.picture_as_pdf_outlined,
+        title: l10n.readerUnsupportedFormat,
+        message: l10n.readerUnsupportedFormatDetail,
       );
     }
 
     _characterCount = content.characterCount;
-    final progressAsync = ref.watch(readingProgressProvider(widget.bookId));
-    final resume = progressAsync.value;
+
+    final resume = ref.watch(readingProgressProvider(widget.bookId)).value;
     if (resume != null) _restorePosition(resume.progressPercentage);
 
     final settings = ref.watch(readerSettingsProvider);
+    final media = MediaQuery.of(context);
+    final measure = Measure.forFontSize(settings.fontSize);
+    final horizontal = ((media.size.width - measure) / 2).clamp(
+      Space.lg,
+      double.infinity,
+    );
+
+    return Stack(
+      key: const ValueKey('reader-text'),
+      children: [
+        // 1. The page.
+        NotificationListener<UserScrollNotification>(
+          onNotification: _handleUserScroll,
+          child: NotificationListener<ScrollUpdateNotification>(
+            onNotification: (_) {
+              _onScroll();
+              return false;
+            },
+            child: GestureDetector(
+              // A tap that does not land on text toggles the chrome, the way a
+              // physical book has no chrome at all.
+              onTap: _toggleChrome,
+              behavior: HitTestBehavior.translucent,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: EdgeInsets.only(
+                  left: horizontal,
+                  right: horizontal,
+                  top: media.padding.top + Space.huge,
+                  bottom: media.padding.bottom + Space.huge + Space.xxl,
+                ),
+                child: ExplainableText(
+                  text: content.text!,
+                  explainLabel: l10n.explain,
+                  highlightColor: context.semantics.explainHighlight,
+                  highlightStart: _explainedStart,
+                  highlightEnd: _explainedEnd,
+                  onExplain: _explainSelection,
+                  style: AppTypography.reading(
+                    fontSize: settings.fontSize,
+                    lineHeight: settings.lineHeight,
+                    color: palette.ink,
+                    serif: settings.typeface.isSerif,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // 2. Persistent, quiet position line.
+        _ReaderFooter(
+          palette: palette,
+          progress: _progress,
+          characterCount: _characterCount,
+          dimmed: _chromeVisible,
+        ),
+
+        // 3. Transient chrome.
+        _ReaderTopBar(
+          visible: _chromeVisible,
+          palette: palette,
+          title: content.title,
+          onBookmark: _addBookmark,
+          onBookmarks: _openBookmarks,
+          onSettings: _openSettings,
+        ),
+        _ReaderControls(
+          visible: _chromeVisible,
+          palette: palette,
+          progress: _progress,
+          characterCount: _characterCount,
+          onSeek: _seekTo,
+          onSeekEnd: _persistPosition,
+        ),
+
+        // 4. One-time teaching moment for the product's core interaction.
+        if (_showExplainHint)
+          _ExplainCoachMark(palette: palette, onDismiss: _dismissExplainHint),
+      ],
+    );
+  }
+}
+
+/// Top chrome: back, title, and the three reading actions.
+class _ReaderTopBar extends StatelessWidget {
+  const _ReaderTopBar({
+    required this.visible,
+    required this.palette,
+    required this.title,
+    required this.onBookmark,
+    required this.onBookmarks,
+    required this.onSettings,
+  });
+
+  final bool visible;
+  final ReadingPalette palette;
+  final String title;
+  final VoidCallback onBookmark;
+  final VoidCallback onBookmarks;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
 
-    return NotificationListener<ScrollUpdateNotification>(
-      key: const ValueKey('text-reader'),
-      onNotification: (_) {
-        _onScroll();
-        return false;
-      },
-      child: Scrollbar(
-        controller: _scrollController,
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          padding: const EdgeInsets.fromLTRB(20, 26, 20, 80),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: _Chrome(
+        visible: visible,
+        slideFrom: -1,
+        child: Container(
+          color: palette.canvas.withValues(alpha: 0.96),
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: Space.sm,
+                vertical: Space.xs,
+              ),
+              child: Row(
                 children: [
-                  const _AiReadingHint(),
-                  const SizedBox(height: 24),
-                  Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: MediaQuery.sizeOf(context).width > 620
-                          ? 48
-                          : 24,
-                      vertical: 42,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: theme.colorScheme.outlineVariant,
+                  IconButton(
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).backButtonTooltip,
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    color: palette.ink,
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: palette.inkMuted,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.ink.withValues(alpha: 0.035),
-                          blurRadius: 24,
-                          offset: const Offset(0, 10),
-                        ),
-                      ],
                     ),
-                    child: ExplainableText(
-                      text: content.text!,
-                      explainLabel: l10n.explain,
-                      style:
-                          theme.textTheme.bodyLarge?.copyWith(
-                            fontSize: settings.fontSize,
-                            height: settings.lineHeight,
-                            letterSpacing: 0.05,
-                          ) ??
-                          TextStyle(fontSize: settings.fontSize),
-                      onExplain: _explainSelection,
-                    ),
+                  ),
+                  IconButton(
+                    tooltip: l10n.bookmarkThisPosition,
+                    icon: const Icon(Icons.bookmark_add_outlined),
+                    color: palette.ink,
+                    onPressed: onBookmark,
+                  ),
+                  IconButton(
+                    tooltip: l10n.bookmarks,
+                    icon: const Icon(Icons.bookmarks_outlined),
+                    color: palette.ink,
+                    onPressed: onBookmarks,
+                  ),
+                  IconButton(
+                    tooltip: l10n.readerSettings,
+                    icon: const Icon(Icons.text_fields_rounded),
+                    color: palette.ink,
+                    onPressed: onSettings,
                   ),
                 ],
               ),
@@ -306,99 +480,147 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 }
 
-class _AiReadingHint extends StatelessWidget {
-  const _AiReadingHint();
+/// Bottom chrome: a scrubber for coarse navigation.
+///
+/// The backend serves a book as one text blob with no chapter structure, so a
+/// table of contents is not possible yet; a scrubber gives the same "jump
+/// somewhere else" capability with the data that exists.
+class _ReaderControls extends StatelessWidget {
+  const _ReaderControls({
+    required this.visible,
+    required this.palette,
+    required this.progress,
+    required this.characterCount,
+    required this.onSeek,
+    required this.onSeekEnd,
+  });
+
+  final bool visible;
+  final ReadingPalette palette;
+  final double progress;
+  final int characterCount;
+  final ValueChanged<double> onSeek;
+  final VoidCallback onSeekEnd;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              Icons.auto_awesome_rounded,
-              size: 17,
-              color: theme.colorScheme.onPrimary,
-            ),
+    final percent = (progress * 100).round();
+
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: _Chrome(
+        visible: visible,
+        slideFrom: 1,
+        child: Container(
+          decoration: BoxDecoration(
+            color: palette.canvas.withValues(alpha: 0.96),
+            border: Border(top: BorderSide(color: palette.hairline)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Select any word or passage, then tap Explain.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onPrimaryContainer,
-                fontWeight: FontWeight.w600,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.md,
+                Space.sm,
+                Space.md,
+                Space.sm,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${l10n.readerPercentRead(percent)}  ·  '
+                    '${_remainingLabel(l10n)}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: palette.inkMuted,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  Semantics(
+                    label: l10n.readerPosition,
+                    child: Slider(
+                      value: progress.clamp(0.0, 1.0),
+                      label: l10n.readerPercentRead(percent),
+                      semanticFormatterCallback: (value) =>
+                          l10n.readerPercentRead((value * 100).round()),
+                      onChanged: onSeek,
+                      onChangeEnd: (_) => onSeekEnd(),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
+
+  String _remainingLabel(AppLocalizations l10n) {
+    final minutes = ReadingTime.minutesRemaining(characterCount, progress);
+    if (minutes == 0) {
+      return progress >= 0.999 ? l10n.readerFinished : l10n.readerAlmostDone;
+    }
+    return l10n.readerMinutesLeft(minutes);
+  }
 }
 
-class _UnsupportedView extends StatelessWidget {
-  const _UnsupportedView({required this.message, super.key});
+/// The one piece of chrome that never leaves: how far in, how much left.
+class _ReaderFooter extends StatelessWidget {
+  const _ReaderFooter({
+    required this.palette,
+    required this.progress,
+    required this.characterCount,
+    required this.dimmed,
+  });
 
-  final String message;
+  final ReadingPalette palette;
+  final double progress;
+  final int characterCount;
+
+  /// True while the full controls are showing, in which case this line steps
+  /// back to avoid saying the same thing twice.
+  final bool dimmed;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 440),
-          padding: const EdgeInsets.all(30),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 68,
-                height: 68,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(21),
-                ),
-                child: Icon(
-                  Icons.picture_as_pdf_outlined,
-                  size: 31,
-                  color: theme.colorScheme.secondary,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                message,
-                style: theme.textTheme.titleLarge,
+    final percent = (progress * 100).round();
+    final minutes = ReadingTime.minutesRemaining(characterCount, progress);
+
+    final remaining = switch (minutes) {
+      0 when progress >= 0.999 => l10n.readerFinished,
+      0 => l10n.readerAlmostDone,
+      _ => l10n.readerMinutesLeft(minutes),
+    };
+
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: dimmed ? 0 : 1,
+          duration: Motion.of(context, Motion.base),
+          curve: Motion.standard,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: Space.sm),
+              child: Text(
+                '${l10n.readerPercentRead(percent)}  ·  $remaining',
                 textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Text files are fully supported today. PDF reading is coming next.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: palette.inkMuted,
+                  letterSpacing: 0.4,
                 ),
-                textAlign: TextAlign.center,
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -406,26 +628,201 @@ class _UnsupportedView extends StatelessWidget {
   }
 }
 
-class _ReaderError extends StatelessWidget {
-  const _ReaderError({required this.onRetry});
+/// Shared show/hide animation for the reader's chrome.
+class _Chrome extends StatelessWidget {
+  const _Chrome({
+    required this.visible,
+    required this.slideFrom,
+    required this.child,
+  });
 
-  final VoidCallback onRetry;
+  final bool visible;
+
+  /// -1 slides up out of the top, 1 slides down out of the bottom.
+  final double slideFrom;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = Motion.of(context, Motion.base);
+    return IgnorePointer(
+      ignoring: !visible,
+      child: AnimatedSlide(
+        offset: visible ? Offset.zero : Offset(0, slideFrom),
+        duration: duration,
+        curve: Motion.standard,
+        child: AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: duration,
+          curve: Motion.standard,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// One-time coach mark that teaches the select → Explain gesture.
+class _ExplainCoachMark extends StatelessWidget {
+  const _ExplainCoachMark({required this.palette, required this.onDismiss});
+
+  final ReadingPalette palette;
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
+
+    return Positioned(
+      left: Space.base,
+      right: Space.base,
+      bottom: Space.huge + Space.base,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(
+          Space.base,
+          Space.md,
+          Space.sm,
+          Space.md,
+        ),
+        decoration: BoxDecoration(
+          color: semantics.surface,
+          borderRadius: Radii.all(Radii.lg),
+          border: Border.all(color: semantics.hairline),
+          boxShadow: Shadows.floating(semantics.shadow),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: Space.xxs),
+              child: Icon(
+                Icons.auto_awesome_rounded,
+                size: 20,
+                color: semantics.accent,
+              ),
+            ),
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.readerExplainHintTitle,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: Space.xxs),
+                  Text(
+                    l10n.readerExplainHintBody,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: semantics.inkMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: Space.sm),
+            TextButton(
+              onPressed: onDismiss,
+              child: Text(l10n.readerExplainHintDismiss),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Skeleton-free, quiet loading state: a reader is about to read, not to watch
+/// a spinner, so this is deliberately minimal and centred.
+class _ReaderLoading extends StatelessWidget {
+  const _ReaderLoading({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.5,
+          color: context.semantics.inkFaint,
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-bleed message for reader-level errors and unsupported formats.
+class _ReaderMessage extends StatelessWidget {
+  const _ReaderMessage({
+    required this.icon,
+    required this.title,
+    this.message,
+    this.onRetry,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
+
+    return SafeArea(
+      child: Stack(
         children: [
-          const Icon(Icons.cloud_off_outlined, size: 52),
-          const SizedBox(height: 16),
-          Text(l10n.libraryLoadError),
-          const SizedBox(height: 18),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded),
-            label: Text(l10n.retry),
+          Align(
+            alignment: Alignment.topLeft,
+            child: IconButton(
+              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+              icon: const Icon(Icons.arrow_back_rounded),
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(Space.xxl),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 32, color: semantics.inkFaint),
+                    const SizedBox(height: Space.base),
+                    Text(
+                      title,
+                      style: theme.textTheme.titleLarge,
+                      textAlign: TextAlign.center,
+                    ),
+                    if (message != null) ...[
+                      const SizedBox(height: Space.sm),
+                      Text(
+                        message!,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: semantics.inkMuted,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                    if (onRetry != null) ...[
+                      const SizedBox(height: Space.xl),
+                      OutlinedButton.icon(
+                        onPressed: onRetry,
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        label: Text(l10n.retry),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ),
         ],
       ),

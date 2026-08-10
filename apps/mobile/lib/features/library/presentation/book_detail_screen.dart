@@ -3,13 +3,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_routes.dart';
+import '../../../core/theme/app_semantics.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/theme/app_typography.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../../shared/formatters/byte_formatter.dart';
+import '../../reader/application/reader_providers.dart';
 import '../application/library_controller.dart';
 import '../application/library_providers.dart';
 import '../domain/book.dart';
+import 'widgets/book_card.dart';
 
-/// Focused overview of a single book before entering the reader.
+/// A single book, before entering the reader.
+///
+/// The action at the top is whatever the book's state actually allows: Read
+/// when it is ready, a disabled explanation while it is being prepared, and
+/// Try again when preparation failed. Offering "Read" on a book the backend has
+/// not finished processing is the most common way this screen used to waste a
+/// reader's time.
 class BookDetailScreen extends ConsumerWidget {
   const BookDetailScreen({required this.bookId, super.key});
 
@@ -25,29 +36,31 @@ class BookDetailScreen extends ConsumerWidget {
         title: Text(l10n.bookDetailTitle),
         actions: [
           if (bookState.hasValue)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: IconButton(
-                tooltip: l10n.deleteBook,
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _confirmDelete(context, ref, bookState.value!),
-              ),
+            IconButton(
+              tooltip: l10n.deleteBook,
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: () => _confirmDelete(context, ref, bookState.value!),
             ),
+          const SizedBox(width: Space.xs),
         ],
       ),
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 280),
-        child: switch (bookState) {
-          AsyncData(:final value) => _BookDetailView(
-            key: ValueKey(value.id),
-            book: value,
+      body: switch (bookState) {
+        AsyncValue(hasValue: true, value: final book?) => _BookDetailView(
+          book: book,
+          onRead: () => context.goNamed(
+            AppRoutes.readerName,
+            pathParameters: {'bookId': book.id},
           ),
-          AsyncError() => _DetailError(
-            onRetry: () => ref.invalidate(bookProvider(bookId)),
-          ),
-          _ => const Center(child: CircularProgressIndicator()),
-        },
-      ),
+          onRetryProcessing: () => ref
+              .read(libraryControllerProvider.notifier)
+              .retryProcessing(book.id)
+              .then((_) => ref.invalidate(bookProvider(bookId))),
+        ),
+        AsyncValue(hasError: true) => _DetailError(
+          onRetry: () => ref.invalidate(bookProvider(bookId)),
+        ),
+        _ => const Center(child: CircularProgressIndicator()),
+      },
     );
   }
 
@@ -63,7 +76,6 @@ class BookDetailScreen extends ConsumerWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.delete_outline_rounded),
         title: Text(l10n.deleteBook),
         content: Text(l10n.deleteBookConfirmation(book.title)),
         actions: [
@@ -95,213 +107,156 @@ class BookDetailScreen extends ConsumerWidget {
   }
 }
 
-class _BookDetailView extends StatelessWidget {
-  const _BookDetailView({required this.book, super.key});
+class _BookDetailView extends ConsumerWidget {
+  const _BookDetailView({
+    required this.book,
+    required this.onRead,
+    required this.onRetryProcessing,
+  });
 
   final Book book;
+  final VoidCallback onRead;
+  final VoidCallback onRetryProcessing;
 
   @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 820;
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(wide ? 40 : 20, 24, wide ? 40 : 20, 48),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1040),
-              child: wide
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(
-                          width: 330,
-                          height: 440,
-                          child: _DetailCover(book: book),
-                        ),
-                        const SizedBox(width: 52),
-                        Expanded(child: _BookInformation(book: book)),
-                      ],
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Center(
-                          child: SizedBox(
-                            width: 250,
-                            height: 330,
-                            child: _DetailCover(book: book),
-                          ),
-                        ),
-                        const SizedBox(height: 34),
-                        _BookInformation(book: book),
-                      ],
-                    ),
-            ),
-          ),
-        );
-      },
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
+
+    final progress = book.status.isReadable
+        ? ref.watch(readingProgressProvider(book.id)).value
+        : null;
+    final fraction = ((progress?.progressPercentage ?? 0) / 100).clamp(
+      0.0,
+      1.0,
     );
-  }
-}
 
-class _DetailCover extends StatelessWidget {
-  const _DetailCover({required this.book});
-
-  final Book book;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = _coverColors(book.title);
-    return Hero(
-      tag: 'book-cover-${book.id}',
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: colors,
-          ),
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
-            BoxShadow(
-              color: colors.last.withValues(alpha: 0.28),
-              blurRadius: 32,
-              offset: const Offset(0, 18),
-            ),
-          ],
-        ),
-        child: Stack(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        Space.lg,
+        Space.sm,
+        Space.lg,
+        Space.xxl,
+      ),
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Positioned(
-              right: -54,
-              bottom: -50,
-              child: Container(
-                width: 210,
-                height: 210,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withValues(alpha: 0.12),
-                ),
-              ),
+            SizedBox(
+              width: 104,
+              height: 148,
+              child: BookCover(book: book, hero: true),
             ),
-            Padding(
-              padding: const EdgeInsets.all(28),
+            const SizedBox(width: Space.base),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(
-                    Icons.auto_stories_rounded,
-                    size: 34,
-                    color: Colors.white,
-                  ),
-                  const Spacer(),
-                  Text(
-                    _initials(book.title),
-                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                      color: Colors.white,
-                      fontSize: 68,
+                  StatusBadge(status: book.status),
+                  const SizedBox(height: Space.md),
+                  Text(book.title, style: theme.textTheme.headlineSmall),
+                  if (fraction > 0.001) ...[
+                    const SizedBox(height: Space.md),
+                    ClipRRect(
+                      borderRadius: Radii.all(Radii.pill),
+                      child: LinearProgressIndicator(
+                        value: fraction,
+                        minHeight: 4,
+                        backgroundColor: semantics.surfaceSunken,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'README.AI EDITION',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.78),
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.8,
+                    const SizedBox(height: Space.sm),
+                    Text(
+                      l10n.readerPercentRead((fraction * 100).round()),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: semantics.inkMuted,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
+        const SizedBox(height: Space.xl),
 
-class _BookInformation extends StatelessWidget {
-  const _BookInformation({required this.book});
-
-  final Book book;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primaryContainer,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            book.status.label.toUpperCase(),
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onPrimaryContainer,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
+        // The primary action reflects the book's real state.
+        if (book.status.isReadable)
+          FilledButton.icon(
+            onPressed: onRead,
+            icon: const Icon(Icons.chrome_reader_mode_outlined, size: 18),
+            label: Text(fraction > 0.001 ? l10n.libraryResume : l10n.readBook),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+            ),
+          )
+        else if (book.status.hasFailed)
+          FilledButton.icon(
+            onPressed: onRetryProcessing,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(l10n.bookRetryProcessing),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+            ),
+          )
+        else
+          FilledButton.icon(
+            onPressed: null,
+            icon: const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            label: Text(l10n.bookNotReadyYet),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
             ),
           ),
-        ),
-        const SizedBox(height: 20),
-        Text(book.title, style: theme.textTheme.headlineLarge),
-        const SizedBox(height: 12),
+
+        if (book.status.hasFailed) ...[
+          const SizedBox(height: Space.sm),
+          Text(
+            l10n.bookFailedHint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: semantics.inkMuted,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+
+        const SizedBox(height: Space.xl),
         Text(
-          'Open the book, select anything confusing, and let AI explain it '
-          'inside the context of what you are reading.',
-          style: theme.textTheme.bodyLarge?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+          l10n.bookAboutFile.toUpperCase(),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: semantics.inkMuted,
           ),
         ),
-        const SizedBox(height: 28),
-        FilledButton.icon(
-          onPressed: () => context.goNamed(
-            AppRoutes.readerName,
-            pathParameters: {'bookId': book.id},
-          ),
-          icon: const Icon(Icons.chrome_reader_mode_outlined),
-          label: Text(l10n.readBook),
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-        ),
-        const SizedBox(height: 30),
-        Text('About this file', style: theme.textTheme.titleLarge),
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.all(6),
+        const SizedBox(height: Space.sm),
+        DecoratedBox(
           decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
+            color: semantics.surface,
+            borderRadius: Radii.all(Radii.lg),
+            border: Border.all(color: semantics.hairline),
           ),
           child: Column(
             children: [
               _DetailRow(
-                icon: Icons.description_outlined,
                 label: l10n.fieldFileName,
                 value: book.originalFilename,
+                mono: true,
               ),
               _DetailRow(
-                icon: Icons.data_usage_outlined,
                 label: l10n.fieldFileSize,
                 value: formatBytes(book.fileSize),
+                mono: true,
               ),
               if (book.totalPages != null)
-                _DetailRow(
-                  icon: Icons.layers_outlined,
-                  label: l10n.fieldPages,
-                  value: '${book.totalPages}',
-                ),
+                _DetailRow(label: l10n.fieldPages, value: '${book.totalPages}'),
               _DetailRow(
-                icon: Icons.calendar_today_outlined,
                 label: l10n.fieldUploadedAt,
                 value: _friendlyDate(book.uploadedAt.toLocal()),
-                showDivider: false,
+                last: true,
               ),
             ],
           ),
@@ -313,67 +268,55 @@ class _BookInformation extends StatelessWidget {
 
 class _DetailRow extends StatelessWidget {
   const _DetailRow({
-    required this.icon,
     required this.label,
     required this.value,
-    this.showDivider = true,
+    this.mono = false,
+    this.last = false,
   });
 
-  final IconData icon;
   final String label;
   final String value;
-  final bool showDivider;
+  final bool mono;
+  final bool last;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantics = context.semantics;
+
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          padding: const EdgeInsets.symmetric(
+            horizontal: Space.base,
+            vertical: Space.md,
+          ),
           child: Row(
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(icon, size: 19, color: theme.colorScheme.primary),
-              ),
-              const SizedBox(width: 13),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      value,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: semantics.inkMuted,
+                  ),
+                ),
+              ),
+              const SizedBox(width: Space.base),
+              Flexible(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.right,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: mono
+                      ? AppTypography.mono(theme.textTheme.bodySmall)
+                      : theme.textTheme.bodyMedium,
                 ),
               ),
             ],
           ),
         ),
-        if (showDivider)
-          Divider(
-            height: 1,
-            indent: 62,
-            color: theme.colorScheme.outlineVariant,
-          ),
+        if (!last) Divider(height: 1, color: semantics.hairline),
       ],
     );
   }
@@ -387,19 +330,30 @@ class _DetailError extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
+
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(Space.xxl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.menu_book_outlined, size: 52),
-            const SizedBox(height: 16),
-            Text(l10n.libraryLoadError),
-            const SizedBox(height: 18),
+            Icon(Icons.cloud_off_rounded, size: 32, color: semantics.inkFaint),
+            const SizedBox(height: Space.base),
+            Text(l10n.libraryLoadError, style: theme.textTheme.titleLarge),
+            const SizedBox(height: Space.sm),
+            Text(
+              l10n.connectionHint,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: semantics.inkMuted,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: Space.xl),
             OutlinedButton.icon(
               onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
               label: Text(l10n.retry),
             ),
           ],
@@ -425,25 +379,4 @@ String _friendlyDate(DateTime date) {
     'Dec',
   ];
   return '${months[date.month - 1]} ${date.day}, ${date.year}';
-}
-
-String _initials(String title) {
-  final words = title
-      .trim()
-      .split(RegExp(r'\s+'))
-      .where((word) => word.isNotEmpty)
-      .take(2);
-  final value = words.map((word) => word[0].toUpperCase()).join();
-  return value.isEmpty ? 'R' : value;
-}
-
-List<Color> _coverColors(String title) {
-  const palettes = [
-    [Color(0xFF4D5FF7), Color(0xFF29369E)],
-    [Color(0xFFDF7A45), Color(0xFF8F3D42)],
-    [Color(0xFF237A68), Color(0xFF17483F)],
-    [Color(0xFF7655C6), Color(0xFF41307D)],
-    [Color(0xFF386C9B), Color(0xFF1D3C61)],
-  ];
-  return palettes[title.hashCode.abs() % palettes.length];
 }

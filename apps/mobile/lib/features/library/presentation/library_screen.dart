@@ -2,16 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/files/file_picker_service.dart';
 import '../../../core/router/app_routes.dart';
-import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_semantics.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../l10n/generated/app_localizations.dart';
+import '../../../shared/formatters/reading_time.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../reader/application/reader_providers.dart';
 import '../application/library_controller.dart';
+import '../application/upload_controller.dart';
 import '../domain/book.dart';
 import 'widgets/book_card.dart';
+import 'widgets/upload_status_card.dart';
 
-/// The user's responsive, API-backed reading library.
+/// The reader's library: resume first, everything else second.
+///
+/// The single most likely reason to open this app is to carry on with the book
+/// already being read, so that book gets a card of its own at the top with its
+/// progress and an explicit Continue action. Browsing the rest of the shelf is
+/// the secondary task and sits below it.
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
 
@@ -20,108 +29,77 @@ class LibraryScreen extends ConsumerStatefulWidget {
 }
 
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
+  final TextEditingController _search = TextEditingController();
   String _query = '';
 
   @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final booksState = ref.watch(libraryControllerProvider);
-
-    return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 72,
-        titleSpacing: 20,
-        title: const _LibraryBrand(),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: IconButton(
-              tooltip: l10n.signOut,
-              icon: const Icon(Icons.logout),
-              onPressed: () =>
-                  ref.read(authControllerProvider.notifier).signOut(),
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _handleUpload(context),
-        icon: const Icon(Icons.add_rounded),
-        label: Text(l10n.uploadBook),
-      ),
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 280),
-        switchInCurve: Curves.easeOutCubic,
-        child: switch (booksState) {
-          AsyncData(:final value) => _LibraryBody(
-            key: const ValueKey('library-data'),
-            books: value,
-            query: _query,
-            onQueryChanged: (value) => setState(() => _query = value),
-            onRefresh: () =>
-                ref.read(libraryControllerProvider.notifier).refresh(),
-            onOpen: (book) => _openBook(context, book),
-            onUpload: () => _handleUpload(context),
-          ),
-          AsyncError() => _ErrorView(
-            key: const ValueKey('library-error'),
-            message: l10n.libraryLoadError,
-            onRetry: () =>
-                ref.read(libraryControllerProvider.notifier).refresh(),
-          ),
-          _ => const _LoadingView(key: ValueKey('library-loading')),
-        },
-      ),
-    );
+  void dispose() {
+    _search.dispose();
+    super.dispose();
   }
 
-  void _openBook(BuildContext context, Book book) {
+  Future<void> _upload() async {
+    await ref.read(uploadControllerProvider.notifier).pickAndUpload();
+  }
+
+  void _open(Book book) {
     context.goNamed(
       AppRoutes.bookDetailName,
       pathParameters: {'bookId': book.id},
     );
   }
 
-  Future<void> _handleUpload(BuildContext context) async {
-    final l10n = AppLocalizations.of(context);
-    final messenger = ScaffoldMessenger.of(context);
-    final picked = await ref.read(filePickerProvider).pickBook();
-    if (picked == null) return;
-    try {
-      await ref.read(libraryControllerProvider.notifier).uploadBook(picked);
-    } on Object {
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(l10n.uploadFailed)));
-    }
+  void _read(Book book) {
+    context.goNamed(AppRoutes.readerName, pathParameters: {'bookId': book.id});
   }
-}
-
-class _LibraryBrand extends StatelessWidget {
-  const _LibraryBrand();
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary,
-            borderRadius: BorderRadius.circular(12),
+    final l10n = AppLocalizations.of(context);
+    final books = ref.watch(libraryControllerProvider);
+    final upload = ref.watch(uploadControllerProvider);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(l10n.libraryTitle),
+        actions: [
+          IconButton(
+            tooltip: l10n.signOut,
+            icon: const Icon(Icons.logout_rounded),
+            onPressed: () =>
+                ref.read(authControllerProvider.notifier).signOut(),
           ),
-          child: Icon(
-            Icons.auto_stories_rounded,
-            size: 21,
-            color: theme.colorScheme.onPrimary,
+          const SizedBox(width: Space.xs),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _upload,
+        icon: const Icon(Icons.add_rounded),
+        label: Text(l10n.uploadBook),
+      ),
+      body: RefreshIndicator(
+        onRefresh: () => ref.read(libraryControllerProvider.notifier).refresh(),
+        child: switch (books) {
+          AsyncValue(hasValue: true, value: final items?) => _LibraryBody(
+            books: items,
+            query: _query,
+            searchController: _search,
+            upload: upload,
+            onQueryChanged: (value) => setState(() => _query = value),
+            onOpen: _open,
+            onRead: _read,
+            onUpload: _upload,
+            onRetryProcessing: (book) => ref
+                .read(libraryControllerProvider.notifier)
+                .retryProcessing(book.id),
           ),
-        ),
-        const SizedBox(width: 11),
-        Text('ReadMe.ai', style: theme.textTheme.titleLarge),
-      ],
+          AsyncValue(hasError: true) => _LibraryError(
+            onRetry: () =>
+                ref.read(libraryControllerProvider.notifier).refresh(),
+          ),
+          _ => const _LibrarySkeleton(key: ValueKey('library-skeleton')),
+        },
+      ),
     );
   }
 }
@@ -130,24 +108,30 @@ class _LibraryBody extends StatelessWidget {
   const _LibraryBody({
     required this.books,
     required this.query,
+    required this.searchController,
+    required this.upload,
     required this.onQueryChanged,
-    required this.onRefresh,
     required this.onOpen,
+    required this.onRead,
     required this.onUpload,
-    super.key,
+    required this.onRetryProcessing,
   });
 
   final List<Book> books;
   final String query;
+  final TextEditingController searchController;
+  final UploadJob? upload;
   final ValueChanged<String> onQueryChanged;
-  final Future<void> Function() onRefresh;
   final void Function(Book) onOpen;
+  final void Function(Book) onRead;
   final VoidCallback onUpload;
+  final void Function(Book) onRetryProcessing;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final normalized = query.trim().toLowerCase();
-    final visibleBooks = normalized.isEmpty
+    final visible = normalized.isEmpty
         ? books
         : books
               .where(
@@ -157,139 +141,266 @@ class _LibraryBody extends StatelessWidget {
               )
               .toList();
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final horizontal = constraints.maxWidth >= 720 ? 32.0 : 20.0;
-        final contentWidth = (constraints.maxWidth - horizontal * 2).clamp(
-          0.0,
-          1180.0,
-        );
-        final columns = contentWidth >= 980
-            ? 3
-            : contentWidth >= 620
-            ? 2
-            : 1;
-        final ratio = columns == 1 ? 2.15 : 0.88;
+    final continueBook = books
+        .where((book) => book.status.isReadable)
+        .firstOrNull;
+    final showHero = continueBook != null && normalized.isEmpty;
 
-        return RefreshIndicator(
-          onRefresh: onRefresh,
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(horizontal, 20, horizontal, 0),
-                sliver: SliverToBoxAdapter(
-                  child: Center(
-                    child: SizedBox(
-                      width: 1180,
-                      child: _LibraryHeader(
-                        bookCount: books.length,
-                        onQueryChanged: onQueryChanged,
-                      ),
+    return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        if (upload != null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.sm,
+                Space.lg,
+                0,
+              ),
+              child: UploadStatusCard(job: upload!),
+            ),
+          ),
+
+        if (showHero)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.base,
+                Space.lg,
+                0,
+              ),
+              child: _ContinueReadingCard(
+                book: continueBook,
+                onRead: () => onRead(continueBook),
+                onDetails: () => onOpen(continueBook),
+              ),
+            ),
+          ),
+
+        if (books.isEmpty && upload == null)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: _LibraryEmpty(onUpload: onUpload),
+          )
+        else ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                Space.xl,
+                Space.lg,
+                Space.md,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      showHero ? l10n.libraryAllBooks : l10n.libraryTitle,
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
-                ),
+                  Text(
+                    l10n.libraryBookCount(books.length),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.semantics.inkMuted,
+                    ),
+                  ),
+                ],
               ),
-              if (books.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _EmptyView(onUpload: onUpload),
-                )
-              else if (visibleBooks.isEmpty)
-                const SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _NoResultsView(),
-                )
-              else ...[
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(horizontal, 26, horizontal, 110),
-                  sliver: SliverLayoutBuilder(
-                    builder: (context, sliverConstraints) {
-                      return SliverGrid(
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: columns,
-                          mainAxisSpacing: 18,
-                          crossAxisSpacing: 18,
-                          childAspectRatio: ratio,
-                        ),
-                        delegate: SliverChildBuilderDelegate((context, index) {
-                          final book = visibleBooks[index];
-                          return BookCard(
-                            book: book,
-                            onTap: () => onOpen(book),
-                          );
-                        }, childCount: visibleBooks.length),
-                      );
-                    },
+            ),
+          ),
+          if (books.length > 3)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Space.lg,
+                  0,
+                  Space.lg,
+                  Space.md,
+                ),
+                child: TextField(
+                  controller: searchController,
+                  onChanged: onQueryChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: l10n.librarySearchHint,
+                    prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                    suffixIcon: query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: l10n.cancel,
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            onPressed: () {
+                              searchController.clear();
+                              onQueryChanged('');
+                            },
+                          ),
                   ),
                 ),
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _LibraryHeader extends StatelessWidget {
-  const _LibraryHeader({required this.bookCount, required this.onQueryChanged});
-
-  final int bookCount;
-  final ValueChanged<String> onQueryChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 700;
-        final copy = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Your reading room', style: theme.textTheme.headlineLarge),
-            const SizedBox(height: 8),
-            Text(
-              bookCount == 0
-                  ? 'A quiet place for ideas worth keeping.'
-                  : '$bookCount ${bookCount == 1 ? 'book' : 'books'} · ready when you are',
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-          ],
-        );
-        final search = SizedBox(
-          width: wide ? 330 : double.infinity,
-          child: TextField(
-            onChanged: onQueryChanged,
-            decoration: const InputDecoration(
-              hintText: 'Search your library',
-              prefixIcon: Icon(Icons.search_rounded),
+          if (visible.isEmpty)
+            SliverToBoxAdapter(child: _NoResults(query: query))
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.lg,
+                0,
+                Space.lg,
+                Space.huge + Space.xxl,
+              ),
+              sliver: SliverList.separated(
+                itemCount: visible.length,
+                separatorBuilder: (_, _) => const SizedBox(height: Space.md),
+                itemBuilder: (context, index) => BookCard(
+                  book: visible[index],
+                  onTap: () => onOpen(visible[index]),
+                  onRetryProcessing: () => onRetryProcessing(visible[index]),
+                ),
+              ),
             ),
-          ),
-        );
-
-        return wide
-            ? Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(child: copy),
-                  const SizedBox(width: 28),
-                  search,
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [copy, const SizedBox(height: 22), search],
-              );
-      },
+        ],
+      ],
     );
   }
 }
 
-class _EmptyView extends StatelessWidget {
-  const _EmptyView({required this.onUpload});
+/// The resume card. Progress is fetched for this one book only: the list
+/// endpoint returns no progress, and requesting it for every book on the shelf
+/// would be an N+1 on every library visit.
+class _ContinueReadingCard extends ConsumerWidget {
+  const _ContinueReadingCard({
+    required this.book,
+    required this.onRead,
+    required this.onDetails,
+  });
+
+  final Book book;
+  final VoidCallback onRead;
+  final VoidCallback onDetails;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final semantics = context.semantics;
+    final progress = ref.watch(readingProgressProvider(book.id)).value;
+    final fraction = ((progress?.progressPercentage ?? 0) / 100).clamp(
+      0.0,
+      1.0,
+    );
+    final started = fraction > 0.001;
+
+    return Container(
+      padding: const EdgeInsets.all(Space.base),
+      decoration: BoxDecoration(
+        color: semantics.surface,
+        borderRadius: Radii.all(Radii.lg),
+        border: Border.all(color: semantics.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            (started ? l10n.libraryContinueReading : l10n.libraryStartReading)
+                .toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: semantics.accent,
+            ),
+          ),
+          const SizedBox(height: Space.md),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 56,
+                height: 78,
+                child: BookCover(book: book, compact: true),
+              ),
+              const SizedBox(width: Space.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      book.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: Space.sm),
+                    if (started) ...[
+                      ClipRRect(
+                        borderRadius: Radii.all(Radii.pill),
+                        child: LinearProgressIndicator(
+                          value: fraction,
+                          minHeight: 4,
+                          backgroundColor: semantics.surfaceSunken,
+                        ),
+                      ),
+                      const SizedBox(height: Space.sm),
+                      Text(
+                        '${l10n.readerPercentRead((fraction * 100).round())}'
+                        '  ·  ${_remaining(context, l10n, fraction)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: semantics.inkMuted,
+                        ),
+                      ),
+                    ] else
+                      Text(
+                        l10n.libraryNotStarted,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: semantics.inkMuted,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.base),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onRead,
+                  icon: const Icon(Icons.chrome_reader_mode_outlined, size: 18),
+                  label: Text(started ? l10n.libraryResume : l10n.readBook),
+                ),
+              ),
+              const SizedBox(width: Space.sm),
+              IconButton(
+                tooltip: l10n.bookDetailTitle,
+                onPressed: onDetails,
+                icon: const Icon(Icons.info_outline_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _remaining(
+    BuildContext context,
+    AppLocalizations l10n,
+    double fraction,
+  ) {
+    // The reader endpoint owns character counts; the library only knows pages,
+    // so an estimate is only offered when the backend supplied a page count.
+    final pages = book.totalPages;
+    if (pages == null || pages == 0) return l10n.libraryKeepGoing;
+    final minutes = ReadingTime.minutesRemaining(pages * 1800, fraction);
+    return minutes == 0
+        ? l10n.readerAlmostDone
+        : l10n.readerMinutesLeft(minutes);
+  }
+}
+
+class _LibraryEmpty extends StatelessWidget {
+  const _LibraryEmpty({required this.onUpload});
 
   final VoidCallback onUpload;
 
@@ -297,52 +408,55 @@ class _EmptyView extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final semantics = context.semantics;
+
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(28, 36, 28, 110),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 620),
-          padding: const EdgeInsets.all(32),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-          ),
+        padding: const EdgeInsets.fromLTRB(
+          Space.xxl,
+          Space.xxl,
+          Space.xxl,
+          Space.huge,
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 76,
-                height: 76,
-                decoration: BoxDecoration(
-                  color: AppColors.lavender,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: const Icon(
-                  Icons.add_to_photos_outlined,
-                  size: 34,
-                  color: AppColors.cobaltDark,
-                ),
+              Icon(
+                Icons.auto_stories_outlined,
+                size: 32,
+                color: semantics.inkFaint,
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: Space.base),
               Text(
                 l10n.libraryEmptyTitle,
                 style: theme.textTheme.headlineSmall,
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: Space.sm),
               Text(
-                'Drop in a text or PDF file and make it easier to understand.',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                l10n.libraryEmptyMessage,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: semantics.inkMuted,
                 ),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: Space.xl),
               FilledButton.icon(
                 onPressed: onUpload,
-                icon: const Icon(Icons.upload_file_rounded),
+                icon: const Icon(Icons.upload_file_rounded, size: 18),
                 label: Text(l10n.uploadBook),
+              ),
+              const SizedBox(height: Space.md),
+              // Says what will actually work before the reader spends time
+              // picking a file the reader cannot yet render.
+              Text(
+                l10n.libraryFormatHint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: semantics.inkFaint,
+                ),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -352,105 +466,114 @@ class _EmptyView extends StatelessWidget {
   }
 }
 
-class _NoResultsView extends StatelessWidget {
-  const _NoResultsView();
+class _NoResults extends StatelessWidget {
+  const _NoResults({required this.query});
+
+  final String query;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 52,
-              color: theme.colorScheme.onSurfaceVariant,
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Space.lg,
+        vertical: Space.xxl,
+      ),
+      child: Column(
+        children: [
+          Text(
+            l10n.libraryNoResults(query),
+            style: theme.textTheme.titleMedium,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: Space.xs),
+          Text(
+            l10n.libraryNoResultsHint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: context.semantics.inkMuted,
             ),
-            const SizedBox(height: 16),
-            Text('No matching books', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 6),
-            Text(
-              'Try another title or file name.',
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
 }
 
-class _LoadingView extends StatelessWidget {
-  const _LoadingView({super.key});
+/// Shaped placeholders in the same rhythm as the real list, so the screen does
+/// not jump when the books arrive.
+class _LibrarySkeleton extends StatelessWidget {
+  const _LibrarySkeleton({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: SizedBox(
-        width: 32,
-        height: 32,
-        child: CircularProgressIndicator(strokeWidth: 3),
+    final semantics = context.semantics;
+
+    Widget block(double height, {double radius = Radii.md}) => Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: semantics.surfaceSunken,
+        borderRadius: Radii.all(radius),
       ),
+    );
+
+    return ListView(
+      padding: const EdgeInsets.all(Space.lg),
+      children: [
+        block(150, radius: Radii.lg),
+        const SizedBox(height: Space.xl),
+        block(18),
+        const SizedBox(height: Space.md),
+        for (var index = 0; index < 3; index++) ...[
+          block(96, radius: Radii.lg),
+          const SizedBox(height: Space.md),
+        ],
+      ],
     );
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry, super.key});
+class _LibraryError extends StatelessWidget {
+  const _LibraryError({required this.onRetry});
 
-  final String message;
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 460),
-          padding: const EdgeInsets.all(30),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
+    final semantics = context.semantics;
+
+    return ListView(
+      padding: const EdgeInsets.all(Space.xxl),
+      children: [
+        const SizedBox(height: Space.xxl),
+        Icon(Icons.cloud_off_rounded, size: 32, color: semantics.inkFaint),
+        const SizedBox(height: Space.base),
+        Text(
+          l10n.libraryLoadError,
+          style: theme.textTheme.titleLarge,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: Space.sm),
+        Text(
+          l10n.connectionHint,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: semantics.inkMuted,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.cloud_off_outlined,
-                size: 52,
-                color: theme.colorScheme.error,
-              ),
-              const SizedBox(height: 18),
-              Text(
-                message,
-                style: theme.textTheme.titleLarge,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Check your connection and give it another go.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 22),
-              OutlinedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
-                label: Text(l10n.retry),
-              ),
-            ],
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: Space.xl),
+        Center(
+          child: OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(l10n.retry),
           ),
         ),
-      ),
+      ],
     );
   }
 }

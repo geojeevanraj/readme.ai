@@ -45,7 +45,7 @@ void main() {
     await _selectAndExplain(tester);
     expect(find.byType(ExplanationSheet), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.close));
+    await tester.tap(find.byIcon(Icons.close_rounded));
     await tester.pumpAndSettle();
 
     // Sheet dismissed; the reader (with its selectable text) is still there.

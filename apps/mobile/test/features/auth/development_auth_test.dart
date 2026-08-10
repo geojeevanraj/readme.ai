@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:readme_ai/app.dart';
 import 'package:readme_ai/core/config/app_config.dart';
 import 'package:readme_ai/core/config/app_environment.dart';
+import 'package:readme_ai/core/preferences/preferences_service.dart';
+import 'package:readme_ai/core/state/retry_policy.dart';
 import 'package:readme_ai/features/auth/application/auth_providers.dart';
 import 'package:readme_ai/features/auth/data/development_auth_repository.dart';
 import 'package:readme_ai/features/auth/presentation/login_page.dart';
@@ -11,6 +13,7 @@ import 'package:readme_ai/features/library/application/library_providers.dart';
 import 'package:readme_ai/features/library/presentation/library_screen.dart';
 
 import '../../helpers/fake_library_repository.dart';
+import '../../helpers/test_preferences.dart';
 
 AppConfig _config({required bool devAuth}) => AppConfig(
   environment: AppEnvironment.development,
@@ -21,7 +24,9 @@ AppConfig _config({required bool devAuth}) => AppConfig(
 Future<void> _pumpDevApp(WidgetTester tester) async {
   await tester.pumpWidget(
     ProviderScope(
+      retry: noAutomaticRetry,
       overrides: [
+        preferencesProvider.overrideWithValue(await testPreferences()),
         appConfigProvider.overrideWithValue(_config(devAuth: true)),
         libraryRepositoryProvider.overrideWithValue(FakeLibraryRepository()),
       ],
@@ -68,7 +73,7 @@ void main() {
     await _pumpDevApp(tester);
     expect(find.byType(LibraryScreen), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.logout));
+    await tester.tap(find.byTooltip('Sign out'));
     await tester.pumpAndSettle();
 
     expect(find.byType(LoginPage), findsOneWidget);
