@@ -4,10 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_semantics.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/theme/app_typography.dart';
+import '../../../core/theme/appearance_controller.dart';
 import '../../../l10n/generated/app_localizations.dart';
+import '../../../shared/formatters/reading_time.dart';
 import '../../explanation/presentation/explanation_sheet.dart';
 import '../application/reader_controller.dart';
 import '../application/reader_providers.dart';
+import '../application/reader_settings.dart';
 import '../application/reader_settings_controller.dart';
 import '../domain/book_content.dart';
 import '../domain/bookmark.dart';
@@ -329,15 +335,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   RenderContext _renderContext(ThemeData theme, TextStyle textStyle) {
-    final colors = theme.colorScheme;
+    // Renderers draw on the reading surface, so their colours come from the
+    // reading palette (Paper / Sepia / Night) rather than the UI colour scheme.
+    // Otherwise a heading or a code block would stay UI-coloured while the
+    // prose around it changed.
+    final palette = ref.watch(readingPaletteProvider);
+    final semantics = context.semantics;
     return RenderContext(
       bodyStyle: textStyle,
       colors: RenderPalette(
-        text: colors.onSurface,
-        muted: colors.onSurfaceVariant,
-        accent: colors.primary,
-        surface: colors.surfaceContainerHighest,
-        outline: colors.outlineVariant,
+        text: palette.ink,
+        muted: palette.inkMuted,
+        accent: semantics.accent,
+        surface: palette.canvas,
+        outline: palette.hairline,
       ),
       onLinkTap: _acknowledgeLink,
     );
@@ -365,6 +376,29 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
     if (span == null) return;
     _explainSelection(selectedText.trim(), span.start, span.end);
+  }
+
+  /// The nearest chapter or section title at or before the current anchor.
+  ///
+  /// The most specific heading wins: inside a section, the section answers
+  /// `where am I` better than the chapter above it.
+  ///
+  /// Only consults elements already cached by the outline, so it costs nothing
+  /// and simply reports nothing when the surrounding window has not arrived.
+  String? _currentHeadingTitle() {
+    final outline = _outline;
+    if (outline == null) return null;
+    final element = outline.readableElementAt(_currentOffset);
+    final start = element?.span?.start ?? _currentOffset;
+    for (final candidate in outline.elementsIn(0, start + 1).reversed) {
+      final title = switch (candidate) {
+        ChapterElement(:final title) => title,
+        SectionElement(:final title) => title,
+        _ => null,
+      };
+      if (title != null && title.trim().isNotEmpty) return title.trim();
+    }
+    return null;
   }
 
   void _explainCurrentPassage() {
@@ -416,11 +450,30 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final l10n = AppLocalizations.of(context);
     final contentState = ref.watch(bookContentProvider(widget.bookId));
     final theme = Theme.of(context);
+    final palette = ref.watch(readingPaletteProvider);
+    final semantics = context.semantics;
+
+    // Minutes left, not just percent: a reader deciding whether to finish a
+    // chapter before bed thinks in time, and the outline knows the document's
+    // canonical length.
+    final characterCount =
+        _outline?.characterCount ?? contentState.value?.text?.length ?? 0;
+    final minutesLeft = ReadingTime.minutesRemaining(characterCount, _progress);
+    final percentRead = l10n.readerPercentRead((_progress * 100).round());
+    // Where am I in the book, structurally? The outline already knows which
+    // element the current anchor sits in, so the nearest chapter or section
+    // title is free. A full jump-list table of contents is not: elements are
+    // fetched by offset range, so listing every chapter would mean downloading
+    // the entire document.
+    final chapter = _currentHeadingTitle();
 
     return Scaffold(
+      backgroundColor: palette.canvas,
       appBar: AppBar(
         toolbarHeight: 68,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: palette.canvas,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: palette.ink,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -428,12 +481,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               contentState.value?.title ?? l10n.appTitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(color: palette.ink),
             ),
             Text(
-              '${(_progress * 100).round()}% complete',
+              switch ((chapter, characterCount > 0)) {
+                (final String title, true) =>
+                  '$title · '
+                      '${l10n.readerMinutesLeft(minutesLeft)}',
+                (final String title, false) => title,
+                (null, true) =>
+                  '$percentRead · ${l10n.readerMinutesLeft(minutesLeft)}',
+                (null, false) => percentRead,
+              },
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
+                color: palette.inkMuted,
               ),
             ),
           ],
@@ -462,9 +525,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           preferredSize: const Size.fromHeight(3),
           child: TweenAnimationBuilder<double>(
             tween: Tween(begin: 0, end: _progress.clamp(0.0, 1.0)),
-            duration: const Duration(milliseconds: 180),
-            builder: (context, value, _) =>
-                LinearProgressIndicator(minHeight: 3, value: value),
+            duration: Motion.of(context, Motion.base),
+            builder: (context, value, _) => LinearProgressIndicator(
+              minHeight: 3,
+              value: value,
+              backgroundColor: palette.hairline,
+              color: semantics.accent,
+            ),
           ),
         ),
       ),
@@ -500,26 +567,36 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     }
 
     final settings = ref.watch(readerSettingsProvider);
+    final palette = ref.watch(readingPaletteProvider);
     final theme = Theme.of(context);
-    final textStyle =
-        theme.textTheme.bodyLarge?.copyWith(
-          fontSize: settings.fontSize,
-          height: settings.lineHeight,
-          letterSpacing: 0.05,
-        ) ??
-        TextStyle(fontSize: settings.fontSize, height: settings.lineHeight);
+    // Body copy uses the reading face, not the UI face: a serif at a generous
+    // line height is what makes long-form text comfortable, and the reader's
+    // own typeface choice decides it. Letter-spacing stays at zero because the
+    // serif already carries its own fitting.
+    final textStyle = AppTypography.reading(
+      fontSize: settings.fontSize,
+      lineHeight: settings.lineHeight,
+      color: palette.ink,
+      serif: settings.typeface == ReaderTypeface.serif,
+    );
 
     return LayoutBuilder(
       key: const ValueKey('text-reader'),
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth > 700;
+        final isWide = constraints.maxWidth > Measure.wideBreakpoint;
         final outerHorizontal = isWide ? 32.0 : 12.0;
         final paperHorizontal = isWide ? 56.0 : 30.0;
         const paperVertical = 34.0;
         const footerHeight = 62.0;
+        // Line length is the strongest lever on reading comfort, so the page
+        // width follows the chosen type size (~64 characters) instead of a
+        // fixed pixel cap. Larger type therefore widens the page rather than
+        // producing four-word lines.
+        final idealPaper =
+            Measure.forFontSize(settings.fontSize) + paperHorizontal * 2;
         final bookWidth = (constraints.maxWidth - outerHorizontal * 2).clamp(
           1.0,
-          860.0,
+          idealPaper,
         );
         final bookHeight = (constraints.maxHeight - 24 - footerHeight).clamp(
           1.0,
@@ -565,11 +642,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   Expanded(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.surface,
-                        borderRadius: BorderRadius.circular(isWide ? 18 : 10),
-                        border: Border.all(
-                          color: theme.colorScheme.outlineVariant,
-                        ),
+                        // The page is paper, so it takes the reading palette:
+                        // choosing Sepia or Night has to change the sheet the
+                        // words sit on, not just the words.
+                        color: palette.canvas,
+                        borderRadius: Radii.all(isWide ? Radii.xl : Radii.md),
+                        border: Border.all(color: palette.hairline),
                         boxShadow: [
                           BoxShadow(
                             color: AppColors.ink.withValues(alpha: 0.10),

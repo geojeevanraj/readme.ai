@@ -200,6 +200,25 @@ Future<void> _selectAndExplain(WidgetTester tester, {int textIndex = 0}) async {
 
 void main() {
   group('structured rendering', () {
+    testWidgets('chrome names the nearest heading the reader is inside', (
+      tester,
+    ) async {
+      _useTallSurface(tester);
+      await pumpReader(tester, repository: _StructuredRepository());
+
+      // The nearest heading wins: inside a section under a chapter, the section
+      // is the more precise answer to "where am I". It appears once as the
+      // rendered heading on the page and once in the app bar with time
+      // remaining. A full jump-list table of contents would require fetching
+      // every element window, so the affordable half ships instead.
+      expect(find.text(_sectionTitle), findsOneWidget);
+      expect(
+        find.textContaining('$_sectionTitle · '),
+        findsOneWidget,
+        reason: 'the app bar should name the heading alongside time remaining',
+      );
+    });
+
     testWidgets('renders elements natively instead of one flat string', (
       tester,
     ) async {
