@@ -27,6 +27,9 @@ class FakeLibraryRepository implements LibraryRepository {
   /// When set, [listBooks] awaits this before returning (to test loading).
   Completer<void>? releaseList;
 
+  /// When set, [uploadBook] awaits this before returning (to test progress).
+  Completer<void>? releaseUpload;
+
   int listCalls = 0;
   int retryProcessingCalls = 0;
 
@@ -68,6 +71,9 @@ class FakeLibraryRepository implements LibraryRepository {
       ..clear()
       ..addAll([0.5, 1]);
 
+    if (releaseUpload != null) {
+      await releaseUpload!.future;
+    }
     if (uploadError != null) {
       throw uploadError!;
     }

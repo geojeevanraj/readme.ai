@@ -115,6 +115,15 @@ abstract final class Measure {
   static const double minWidth = 320;
   static const double maxWidth = 680;
 
+  /// Width at which a layout stops being a phone layout.
+  ///
+  /// Beyond this the UI gains breathing room rather than line length: a list
+  /// row stretched across a desktop window is harder to scan, not easier.
+  static const double wideBreakpoint = 720;
+
+  /// Maximum width for list and detail content on large viewports.
+  static const double contentMaxWidth = 760;
+
   /// Ideal column width for [fontSize] (~64 characters at ~0.5em per glyph).
   static double forFontSize(double fontSize) =>
       (fontSize * 32).clamp(minWidth, maxWidth);

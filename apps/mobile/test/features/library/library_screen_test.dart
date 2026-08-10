@@ -205,4 +205,37 @@ void main() {
     expect(find.byType(BookCard), findsNothing);
     expect(find.text('Your library is empty'), findsOneWidget);
   });
+
+  // Carried over from main: the library must survive a desktop-sized window.
+  // The redesign answers wide viewports by centring a measured column rather
+  // than growing a grid, so the assertion is that rows stay intact and no
+  // layout exception is thrown at either size.
+  testWidgets('library remains stable at phone and desktop widths', (
+    tester,
+  ) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final auth = FakeAuthRepository(initialUser: _signedIn);
+    addTearDown(auth.dispose);
+    final library = FakeLibraryRepository(
+      initial: [
+        _book(id: 'b1'),
+        _book(id: 'b2', title: 'Designing Data-Intensive Applications'),
+        _book(id: 'b3', title: 'The Pragmatic Programmer'),
+      ],
+    );
+
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    await pumpApp(tester, authRepository: auth, libraryRepository: library);
+    expect(tester.takeException(), isNull);
+    expect(find.byType(BookCard), findsWidgets);
+
+    tester.view.physicalSize = const Size(1440, 1000);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(BookCard), findsWidgets);
+  });
 }

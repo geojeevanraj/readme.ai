@@ -7,10 +7,29 @@ import uuid
 from httpx import AsyncClient
 
 from app.modules.auth.verifier import FirebaseIdentity
+from app.modules.library.router import _read_upload_with_limit
 from tests.conftest import FakeStorageService, FakeTokenVerifier
 
 _AUTH = {"Authorization": "Bearer valid-token"}
 _BOOKS_URL = "/api/v1/books"
+
+
+class _RecordingUpload:
+    def __init__(self) -> None:
+        self.requested_size: int | None = None
+
+    async def read(self, size: int) -> bytes:
+        self.requested_size = size
+        return b"x" * size
+
+
+async def test_upload_reader_caps_input_at_limit_plus_one() -> None:
+    upload = _RecordingUpload()
+
+    content = await _read_upload_with_limit(upload, max_bytes=8)
+
+    assert upload.requested_size == 9
+    assert content == b"x" * 9
 
 
 def _upload_payload(filename: str = "book.pdf", title: str | None = "My Book"):

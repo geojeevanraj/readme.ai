@@ -132,136 +132,148 @@ class _BookDetailView extends ConsumerWidget {
       1.0,
     );
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(
-        Space.lg,
-        Space.sm,
-        Space.lg,
-        Space.xxl,
-      ),
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    // Detail content keeps a reading measure on wide viewports instead of
+    // stretching metadata across the full window.
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: Measure.contentMaxWidth),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            Space.lg,
+            Space.sm,
+            Space.lg,
+            Space.xxl,
+          ),
           children: [
-            SizedBox(
-              width: 104,
-              height: 148,
-              child: BookCover(book: book, hero: true),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 104,
+                  height: 148,
+                  child: BookCover(book: book, hero: true),
+                ),
+                const SizedBox(width: Space.base),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      StatusBadge(status: book.status),
+                      const SizedBox(height: Space.md),
+                      Text(book.title, style: theme.textTheme.headlineSmall),
+                      if (fraction > 0.001) ...[
+                        const SizedBox(height: Space.md),
+                        ClipRRect(
+                          borderRadius: Radii.all(Radii.pill),
+                          child: LinearProgressIndicator(
+                            value: fraction,
+                            minHeight: 4,
+                            backgroundColor: semantics.surfaceSunken,
+                          ),
+                        ),
+                        const SizedBox(height: Space.sm),
+                        Text(
+                          l10n.readerPercentRead((fraction * 100).round()),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: semantics.inkMuted,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: Space.base),
-            Expanded(
+            const SizedBox(height: Space.xl),
+
+            // The primary action reflects the book's real state.
+            if (book.status.isReadable)
+              FilledButton.icon(
+                onPressed: onRead,
+                icon: const Icon(Icons.chrome_reader_mode_outlined, size: 18),
+                label: Text(
+                  fraction > 0.001 ? l10n.libraryResume : l10n.readBook,
+                ),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+              )
+            else if (book.status.hasFailed)
+              FilledButton.icon(
+                onPressed: onRetryProcessing,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: Text(l10n.bookRetryProcessing),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+              )
+            else
+              FilledButton.icon(
+                onPressed: null,
+                icon: const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                label: Text(l10n.bookNotReadyYet),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+              ),
+
+            if (book.status.hasFailed) ...[
+              const SizedBox(height: Space.sm),
+              Text(
+                l10n.bookFailedHint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: semantics.inkMuted,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+
+            const SizedBox(height: Space.xl),
+            Text(
+              l10n.bookAboutFile.toUpperCase(),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: semantics.inkMuted,
+              ),
+            ),
+            const SizedBox(height: Space.sm),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: semantics.surface,
+                borderRadius: Radii.all(Radii.lg),
+                border: Border.all(color: semantics.hairline),
+              ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  StatusBadge(status: book.status),
-                  const SizedBox(height: Space.md),
-                  Text(book.title, style: theme.textTheme.headlineSmall),
-                  if (fraction > 0.001) ...[
-                    const SizedBox(height: Space.md),
-                    ClipRRect(
-                      borderRadius: Radii.all(Radii.pill),
-                      child: LinearProgressIndicator(
-                        value: fraction,
-                        minHeight: 4,
-                        backgroundColor: semantics.surfaceSunken,
-                      ),
+                  _DetailRow(
+                    label: l10n.fieldFileName,
+                    value: book.originalFilename,
+                    mono: true,
+                  ),
+                  _DetailRow(
+                    label: l10n.fieldFileSize,
+                    value: formatBytes(book.fileSize),
+                    mono: true,
+                  ),
+                  if (book.totalPages != null)
+                    _DetailRow(
+                      label: l10n.fieldPages,
+                      value: '${book.totalPages}',
                     ),
-                    const SizedBox(height: Space.sm),
-                    Text(
-                      l10n.readerPercentRead((fraction * 100).round()),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: semantics.inkMuted,
-                      ),
-                    ),
-                  ],
+                  _DetailRow(
+                    label: l10n.fieldUploadedAt,
+                    value: _friendlyDate(book.uploadedAt.toLocal()),
+                    last: true,
+                  ),
                 ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: Space.xl),
-
-        // The primary action reflects the book's real state.
-        if (book.status.isReadable)
-          FilledButton.icon(
-            onPressed: onRead,
-            icon: const Icon(Icons.chrome_reader_mode_outlined, size: 18),
-            label: Text(fraction > 0.001 ? l10n.libraryResume : l10n.readBook),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-            ),
-          )
-        else if (book.status.hasFailed)
-          FilledButton.icon(
-            onPressed: onRetryProcessing,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: Text(l10n.bookRetryProcessing),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-            ),
-          )
-        else
-          FilledButton.icon(
-            onPressed: null,
-            icon: const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            label: Text(l10n.bookNotReadyYet),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-            ),
-          ),
-
-        if (book.status.hasFailed) ...[
-          const SizedBox(height: Space.sm),
-          Text(
-            l10n.bookFailedHint,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: semantics.inkMuted,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-
-        const SizedBox(height: Space.xl),
-        Text(
-          l10n.bookAboutFile.toUpperCase(),
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: semantics.inkMuted,
-          ),
-        ),
-        const SizedBox(height: Space.sm),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: semantics.surface,
-            borderRadius: Radii.all(Radii.lg),
-            border: Border.all(color: semantics.hairline),
-          ),
-          child: Column(
-            children: [
-              _DetailRow(
-                label: l10n.fieldFileName,
-                value: book.originalFilename,
-                mono: true,
-              ),
-              _DetailRow(
-                label: l10n.fieldFileSize,
-                value: formatBytes(book.fileSize),
-                mono: true,
-              ),
-              if (book.totalPages != null)
-                _DetailRow(label: l10n.fieldPages, value: '${book.totalPages}'),
-              _DetailRow(
-                label: l10n.fieldUploadedAt,
-                value: _friendlyDate(book.uploadedAt.toLocal()),
-                last: true,
-              ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

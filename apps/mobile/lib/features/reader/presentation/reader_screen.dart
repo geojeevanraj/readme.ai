@@ -1,35 +1,35 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/preferences/preferences_service.dart';
-import '../../../core/theme/app_semantics.dart';
-import '../../../core/theme/app_tokens.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../core/theme/appearance_controller.dart';
-import '../../../core/theme/reading_palette.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../l10n/generated/app_localizations.dart';
-import '../../../shared/formatters/reading_time.dart';
 import '../../explanation/presentation/explanation_sheet.dart';
 import '../application/reader_controller.dart';
 import '../application/reader_providers.dart';
 import '../application/reader_settings_controller.dart';
 import '../domain/book_content.dart';
 import '../domain/bookmark.dart';
+import '../domain/character_anchor.dart';
 import '../domain/content_format.dart';
+import '../domain/document_outline.dart';
+import '../domain/document_pagination_source.dart';
+import '../domain/pagination_source.dart';
+import '../domain/reader_element.dart';
+import 'pagination/document_page.dart';
+import 'pagination/reading_paginator.dart';
+import 'rendering/element_renderer.dart';
+import 'rendering/element_renderer_registry.dart';
+import 'rendering/page_body.dart';
+import 'rendering/page_composer.dart';
+import 'rendering/render_block.dart';
+import 'rendering/selection_resolver.dart';
 import 'widgets/bookmarks_sheet.dart';
-import 'widgets/explainable_text.dart';
+import 'widgets/page_turn_view.dart';
 import 'widgets/reader_settings_sheet.dart';
 
 /// Immersive, API-backed reader with contextual AI assistance.
-///
-/// The page is the interface. Chrome (title bar, controls) is transient: it
-/// hides when the reader scrolls forward, returns when they scroll back, and
-/// can be toggled with a tap. What remains at all times is a single quiet
-/// footer line — percentage read and minutes left — because "where am I and how
-/// much is left" is the one question a reader asks constantly.
 class ReaderScreen extends ConsumerStatefulWidget {
   const ReaderScreen({required this.bookId, super.key});
 
@@ -40,149 +40,236 @@ class ReaderScreen extends ConsumerStatefulWidget {
 }
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
-  final ScrollController _scrollController = ScrollController();
-  final Stopwatch _sessionStopwatch = Stopwatch()..start();
+  /// How many pages ahead of the current one to prepare, so the reader can turn
+  /// forward without waiting for measurement.
+  static const int _lookahead = 2;
 
-  Timer? _saveDebounce;
+  final Stopwatch _sessionStopwatch = Stopwatch()..start();
+  late final ReaderController _readerController;
   bool _restored = false;
-  bool _chromeVisible = true;
-  bool _showExplainHint = false;
   double _progress = 0;
   int _characterCount = 0;
+  int _currentOffset = 0;
+  int _currentIndex = 0;
+  String? _contentText;
 
-  /// Range of the passage most recently sent for explanation, kept highlighted.
-  int? _explainedStart;
-  int? _explainedEnd;
+  // Incremental pagination state. The paginator measures only the pages needed
+  // for the current reading window; it is recreated when the layout key
+  // (font/size/viewport) changes, preserving the current character offset.
+  PaginationSource? _source;
+  String? _sourceText;
+  ReadingPaginator? _paginator;
+  PaginationKey? _paginationKey;
+
+  // Structured rendering. The composer turns a measured page plus the elements
+  // covering it into render blocks; the registry maps each block to a renderer.
+  // None of this participates in pagination — page boundaries are already fixed
+  // by the measurer over canonical text.
+  final PageComposer _composer = PageComposer();
+  final ElementRendererRegistry _registry = ElementRendererRegistry.standard();
+  static const SelectionResolver _selectionResolver = SelectionResolver();
+  DocumentOutline? _outline;
 
   @override
   void initState() {
     super.initState();
-    final prefs = ref.read(preferencesProvider);
-    _showExplainHint =
-        !(prefs.readBool(PreferenceKeys.explainHintSeen) ?? false);
+    _readerController = ref.read(readerControllerProvider);
   }
 
   @override
   void dispose() {
-    _saveDebounce?.cancel();
-    _persistPosition();
-    _scrollController.dispose();
+    // Persistence on teardown is best-effort: if the surrounding scope is
+    // already gone, losing the final position must not throw during disposal.
+    try {
+      _persistPosition();
+    } on Object {
+      // Intentionally ignored; the last saved position stands.
+    }
+    _paginator?.removeListener(_onPaginatorChanged);
+    _paginator?.dispose();
     super.dispose();
   }
 
-  // ------------------------------------------------------------- position ---
-
-  double get _scrollFraction {
-    if (!_scrollController.hasClients) return 0;
-    final max = _scrollController.position.maxScrollExtent;
-    if (max <= 0) return 0;
-    return (_scrollController.offset / max).clamp(0.0, 1.0);
+  void _onPaginatorChanged() {
+    if (mounted) setState(() {});
   }
 
-  int _offsetFromFraction(double fraction) =>
-      (fraction * _characterCount).round();
-
-  void _onScroll() {
-    final fraction = _scrollFraction;
-    if (fraction != _progress) {
-      setState(() => _progress = fraction);
+  /// Returns the paginator for the current layout, creating a new one only when
+  /// the layout key changes. Construction is cheap and does no measurement;
+  /// pagination is kicked off after the frame, never inside `build()`.
+  ReadingPaginator _ensurePaginator({
+    required String text,
+    required TextStyle style,
+    required Size pageSize,
+    required TextDirection textDirection,
+    required TextScaler textScaler,
+    required Locale? locale,
+  }) {
+    if (_source == null || _sourceText != text) {
+      final outline = _outline;
+      // Structured when an outline is available, canonical text otherwise. The
+      // choice is made once, here; nothing downstream branches on it.
+      _source = outline == null
+          ? StringPaginationSource(text)
+          : DocumentPaginationSource(canonicalText: text, outline: outline);
+      _sourceText = text;
     }
-    _saveDebounce?.cancel();
-    _saveDebounce = Timer(const Duration(milliseconds: 1200), _persistPosition);
+
+    final key = PaginationKey(
+      fontSize: style.fontSize ?? 0,
+      lineHeight: style.height ?? 0,
+      width: pageSize.width,
+      height: pageSize.height,
+      textScalerDescription: textScaler.toString(),
+      textDirection: textDirection,
+      locale: locale,
+    );
+
+    if (_paginator == null || _paginationKey != key) {
+      final previous = _paginator;
+      previous?.removeListener(_onPaginatorChanged);
+      previous?.dispose();
+
+      final paginator = ReadingPaginator(
+        source: _source!,
+        style: style,
+        pageSize: pageSize,
+        textDirection: textDirection,
+        textScaler: textScaler,
+        locale: locale,
+      )..addListener(_onPaginatorChanged);
+      _paginator = paginator;
+      _paginationKey = key;
+
+      // Measure off the build phase: prepare the current page (and look-ahead)
+      // for wherever the reader currently is, not the whole document.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _paginator != paginator) return;
+        _prepareWindow(paginator);
+      });
+    }
+    return _paginator!;
+  }
+
+  Future<void> _prepareWindow(ReadingPaginator paginator) async {
+    final index = await paginator.ensureOffset(_currentOffset);
+    if (!mounted || _paginator != paginator) return;
+    setState(() => _currentIndex = index);
+    unawaited(paginator.ensureIndex(index + _lookahead));
+    unawaited(_prepareStructure(paginator, index));
+  }
+
+  /// Loads the structure covering the current page and its look-ahead.
+  ///
+  /// Always off the build phase, and never fatal: if elements cannot be loaded
+  /// the page still renders from canonical text.
+  Future<void> _prepareStructure(ReadingPaginator paginator, int index) async {
+    final outline = _outline;
+    if (outline == null) return;
+    final page = paginator.pageOrNull(index);
+    if (page == null) return;
+    final last = paginator.pageOrNull(index + _lookahead) ?? page;
+    try {
+      await outline.ensureRange(page.startOffset, last.endOffset);
+      unawaited(outline.prefetchAfter(last.endOffset));
+    } on Object {
+      // Degradation is the design: reading continues on canonical text.
+      return;
+    }
+    if (mounted && _paginator == paginator) setState(() {});
   }
 
   void _persistPosition() {
-    if (!_scrollController.hasClients || _characterCount == 0) return;
-    final fraction = _scrollFraction;
+    if (_characterCount == 0) return;
+    final fraction = (_currentOffset / _characterCount).clamp(0.0, 1.0);
     final seconds = _sessionStopwatch.elapsed.inSeconds;
     _sessionStopwatch
       ..reset()
       ..start();
     unawaited(
-      ref
-          .read(readerControllerProvider)
-          .saveProgress(
-            widget.bookId,
-            currentPosition: _offsetFromFraction(fraction).toString(),
-            progressPercentage: fraction * 100,
-            readingTimeSeconds: seconds,
-          ),
+      _readerController.saveProgress(
+        widget.bookId,
+        currentPosition: _currentOffset.toString(),
+        progressPercentage: fraction * 100,
+        readingTimeSeconds: seconds,
+      ),
     );
   }
 
-  void _restorePosition(double percentage) {
-    if (_restored) return;
+  void _restorePosition(String anchor, double percentage) {
+    if (_restored || _characterCount == 0) return;
     _restored = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients || !mounted) return;
-      final max = _scrollController.position.maxScrollExtent;
-      final target = (percentage / 100).clamp(0.0, 1.0) * max;
-      _scrollController.jumpTo(target);
-      setState(() => _progress = percentage / 100);
-    });
-  }
+    final savedOffset = int.tryParse(anchor);
+    _currentOffset =
+        (savedOffset ??
+                ((percentage / 100).clamp(0.0, 1.0) * _characterCount).round())
+            .clamp(0, _characterCount);
+    _progress = (_currentOffset / _characterCount).clamp(0.0, 1.0);
 
-  void _seekTo(double fraction) {
-    if (!_scrollController.hasClients) return;
-    _scrollController.jumpTo(
-      fraction.clamp(0.0, 1.0) * _scrollController.position.maxScrollExtent,
-    );
-    setState(() => _progress = fraction);
-  }
-
-  void _jumpToAnchor(String anchor) {
-    final offset = int.tryParse(anchor) ?? 0;
-    if (_characterCount == 0 || !_scrollController.hasClients) return;
-    final fraction = (offset / _characterCount).clamp(0.0, 1.0);
-    _scrollController.animateTo(
-      fraction * _scrollController.position.maxScrollExtent,
-      duration: Motion.of(context, Motion.slow),
-      curve: Motion.standard,
-    );
-  }
-
-  // ---------------------------------------------------------------- chrome ---
-
-  void _toggleChrome() => setState(() => _chromeVisible = !_chromeVisible);
-
-  bool _handleUserScroll(UserScrollNotification notification) {
-    switch (notification.direction) {
-      case ScrollDirection.forward:
-        if (!_chromeVisible) setState(() => _chromeVisible = true);
-      case ScrollDirection.reverse:
-        if (_chromeVisible) setState(() => _chromeVisible = false);
-      case ScrollDirection.idle:
-        break;
+    // Reading progress resolves asynchronously, so it can arrive after the
+    // paginator's initial window (built for offset 0) was already prepared.
+    // Align the reading window to the restored offset off the build phase.
+    if (_currentOffset > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final paginator = _paginator;
+        if (mounted && paginator != null) _prepareWindow(paginator);
+      });
     }
-    return false;
   }
 
-  void _dismissExplainHint() {
-    ref
-        .read(preferencesProvider)
-        .writeBool(PreferenceKeys.explainHintSeen, value: true);
-    setState(() => _showExplainHint = false);
+  Future<void> _jumpToAnchor(String anchor) async {
+    if (_characterCount == 0) return;
+    final offset = (int.tryParse(anchor) ?? 0).clamp(0, _characterCount);
+    _currentOffset = offset;
+    _progress = (_currentOffset / _characterCount).clamp(0.0, 1.0);
+
+    final paginator = _paginator;
+    if (paginator == null) {
+      setState(() {});
+    } else {
+      final index = await paginator.ensureOffset(offset);
+      if (!mounted) return;
+      setState(() => _currentIndex = index);
+      unawaited(paginator.ensureIndex(index + _lookahead));
+      unawaited(_prepareStructure(paginator, index));
+    }
+    _persistPosition();
   }
 
-  // --------------------------------------------------------------- actions ---
+  void _onPageChanged(ReadingPaginator paginator, int index) {
+    final page = paginator.pageOrNull(index);
+    if (page == null) return;
+    setState(() {
+      _currentIndex = index;
+      _currentOffset = page.startOffset;
+      _progress = _characterCount == 0
+          ? 0
+          : (_currentOffset / _characterCount).clamp(0.0, 1.0);
+    });
+    _persistPosition();
+    // Prepare the next few pages so the following turn is instant.
+    unawaited(paginator.ensureIndex(index + _lookahead));
+    unawaited(_prepareStructure(paginator, index));
+  }
 
   Future<void> _addBookmark() async {
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final offset = _offsetFromFraction(_scrollFraction);
+    final offset = _currentOffset;
+    final label = _passageAt(_contentText ?? '', offset, maxLength: 72);
     await ref
         .read(readerControllerProvider)
-        .addBookmark(widget.bookId, anchor: offset.toString());
-    if (!mounted) return;
+        .addBookmark(
+          widget.bookId,
+          anchor: offset.toString(),
+          label: label.isEmpty ? null : label,
+        );
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text(l10n.bookmarkAdded),
-          action: SnackBarAction(
-            label: l10n.bookmarks,
-            onPressed: _openBookmarks,
-          ),
+          action: SnackBarAction(label: 'View', onPressed: _openBookmarks),
         ),
       );
   }
@@ -190,10 +277,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void _openBookmarks() {
     showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
       isScrollControlled: true,
-      useSafeArea: true,
       builder: (_) => BookmarksSheet(
         bookId: widget.bookId,
+        contentText: _contentText,
         characterCount: _characterCount,
         onJump: (Bookmark bookmark) {
           Navigator.of(context).pop();
@@ -206,623 +294,472 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void _openSettings() {
     showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
+      showDragHandle: true,
       builder: (_) => const ReaderSettingsSheet(),
     );
   }
 
   void _explainSelection(String text, int start, int end) {
-    setState(() {
-      _explainedStart = start;
-      _explainedEnd = end;
-      if (_showExplainHint) _dismissExplainHint();
-    });
-
     final args = (
       bookId: widget.bookId,
       anchor: start.toString(),
       endAnchor: end.toString(),
       selectedText: text,
     );
-
     showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
       isScrollControlled: true,
-      useSafeArea: true,
-      // A light barrier keeps the highlighted passage readable above the sheet:
-      // the answer and the question stay on screen together.
-      barrierColor: context.semantics.shadow.withValues(alpha: 0.16),
-      builder: (_) => ExplanationSheet(
-        args: args,
-        onSave: () => _saveExplanation(start, text),
-      ),
+      builder: (_) => ExplanationSheet(args: args),
     );
   }
 
-  Future<void> _saveExplanation(int anchor, String selectedText) async {
-    final l10n = AppLocalizations.of(context);
-    final messenger = ScaffoldMessenger.of(context);
-    await ref
-        .read(readerControllerProvider)
-        .addBookmark(
-          widget.bookId,
-          anchor: anchor.toString(),
-          label: selectedText,
-        );
-    if (!mounted) return;
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(l10n.explanationSaved)));
+  /// Composes the blocks for a measured page.
+  ///
+  /// Structure is used only when it is already resident, so this never awaits
+  /// and never triggers I/O during a build. With no structure the composer
+  /// returns plain-text blocks covering the page exactly.
+  List<RenderBlock> _composeBlocks(DocumentPage page) {
+    final outline = _outline;
+    final elements =
+        outline != null && outline.isReady(page.startOffset, page.endOffset)
+        ? outline.elementsIn(page.startOffset, page.endOffset)
+        : const <ReaderElement>[];
+    return _composer.compose(page: page, elements: elements);
   }
 
-  // ----------------------------------------------------------------- build ---
+  RenderContext _renderContext(ThemeData theme, TextStyle textStyle) {
+    final colors = theme.colorScheme;
+    return RenderContext(
+      bodyStyle: textStyle,
+      colors: RenderPalette(
+        text: colors.onSurface,
+        muted: colors.onSurfaceVariant,
+        accent: colors.primary,
+        surface: colors.surfaceContainerHighest,
+        outline: colors.outlineVariant,
+      ),
+      onLinkTap: _acknowledgeLink,
+    );
+  }
+
+  /// Hyperlinks acknowledge their target without leaving the Reader.
+  void _acknowledgeLink(String target) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(target), duration: const Duration(seconds: 2)),
+      );
+  }
+
+  /// Resolves a page selection to canonical offsets, then explains it.
+  ///
+  /// Resolution can decline: an unlocatable or ambiguous selection submits
+  /// nothing rather than a guessed range.
+  void _explainPageSelection(DocumentPage page, String selectedText) {
+    final span = _selectionResolver.resolve(
+      pageText: page.text,
+      pageStartOffset: page.startOffset,
+      selectedText: selectedText,
+      hintOffset: _currentOffset,
+    );
+    if (span == null) return;
+    _explainSelection(selectedText.trim(), span.start, span.end);
+  }
+
+  void _explainCurrentPassage() {
+    // Whole-passage explanation prefers the readable element the reader is
+    // inside — paragraph, code block, list item, quote, caption or table cell —
+    // and falls back to the surrounding text block when structure is absent.
+    final element = _outline?.readableElementAt(_currentOffset);
+    final span = element?.span;
+    final text = _contentText;
+    if (span != null && text != null) {
+      final selected = CharacterAnchor.substring(
+        text,
+        span.start,
+        span.end,
+      ).trim();
+      if (selected.isNotEmpty) {
+        _explainSelection(selected, span.start, span.end);
+        return;
+      }
+    }
+    _explainSurroundingText();
+  }
+
+  void _explainSurroundingText() {
+    final text = _contentText;
+    if (text == null || text.isEmpty) return;
+    final scalarOffset = _currentOffset.clamp(0, CharacterAnchor.length(text));
+    final codeUnitOffset = CharacterAnchor.toCodeUnit(text, scalarOffset);
+    final codeUnitStart = _paragraphStart(text, codeUnitOffset);
+    final codeUnitEnd = _paragraphEnd(text, codeUnitOffset);
+    final rawPassage = text.substring(codeUnitStart, codeUnitEnd);
+    final leadingWhitespace = rawPassage.length - rawPassage.trimLeft().length;
+    final trailingWhitespace =
+        rawPassage.length - rawPassage.trimRight().length;
+    final adjustedStart = codeUnitStart + leadingWhitespace;
+    final adjustedEnd = codeUnitEnd - trailingWhitespace;
+    final passage = text.substring(adjustedStart, adjustedEnd);
+    if (passage.isNotEmpty) {
+      _explainSelection(
+        passage,
+        CharacterAnchor.fromCodeUnit(text, adjustedStart),
+        CharacterAnchor.fromCodeUnit(text, adjustedEnd),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final palette = ref.watch(readingPaletteProvider);
+    final l10n = AppLocalizations.of(context);
     final contentState = ref.watch(bookContentProvider(widget.bookId));
+    final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: palette.canvas,
-      body: AnimatedSwitcher(
-        duration: Motion.of(context, Motion.base),
-        child: switch (contentState) {
-          AsyncValue(hasValue: true, :final value?) => _buildReader(
-            context,
-            palette,
-            value,
+      appBar: AppBar(
+        toolbarHeight: 68,
+        backgroundColor: theme.colorScheme.surface,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              contentState.value?.title ?? l10n.appTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              '${(_progress * 100).round()}% complete',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: l10n.bookmarkThisPosition,
+            icon: const Icon(Icons.bookmark_add_outlined),
+            onPressed: contentState.hasValue ? _addBookmark : null,
           ),
-          AsyncValue(hasError: true) => _ReaderMessage(
-            key: const ValueKey('reader-error'),
-            icon: Icons.cloud_off_rounded,
-            title: AppLocalizations.of(context).libraryLoadError,
-            message: AppLocalizations.of(context).connectionHint,
+          IconButton(
+            tooltip: l10n.bookmarks,
+            icon: const Icon(Icons.bookmarks_outlined),
+            onPressed: _openBookmarks,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              tooltip: l10n.readerSettings,
+              icon: const Icon(Icons.tune_rounded),
+              onPressed: _openSettings,
+            ),
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(3),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: _progress.clamp(0.0, 1.0)),
+            duration: const Duration(milliseconds: 180),
+            builder: (context, value, _) =>
+                LinearProgressIndicator(minHeight: 3, value: value),
+          ),
+        ),
+      ),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        child: switch (contentState) {
+          AsyncData(:final value) => _buildContent(context, value),
+          AsyncError() => _ReaderError(
             onRetry: () => ref.invalidate(bookContentProvider(widget.bookId)),
           ),
-          _ => const _ReaderLoading(key: ValueKey('reader-loading')),
+          _ => const Center(child: CircularProgressIndicator()),
         },
       ),
     );
   }
 
-  Widget _buildReader(
-    BuildContext context,
-    ReadingPalette palette,
-    BookContent content,
-  ) {
+  Widget _buildContent(BuildContext context, BookContent content) {
     final l10n = AppLocalizations.of(context);
-
     if (content.format != ContentFormat.text || content.text == null) {
-      return _ReaderMessage(
-        key: const ValueKey('reader-unsupported'),
-        icon: Icons.picture_as_pdf_outlined,
-        title: l10n.readerUnsupportedFormat,
-        message: l10n.readerUnsupportedFormatDetail,
+      return _UnsupportedView(
+        key: const ValueKey('unsupported-reader'),
+        message: l10n.readerUnsupportedFormat,
       );
     }
 
-    _characterCount = content.characterCount;
-
-    final resume = ref.watch(readingProgressProvider(widget.bookId)).value;
-    if (resume != null) _restorePosition(resume.progressPercentage);
+    _characterCount = CharacterAnchor.length(content.text!);
+    _contentText = content.text;
+    _outline ??= ref.read(documentOutlineProvider(widget.bookId));
+    final progressAsync = ref.watch(readingProgressProvider(widget.bookId));
+    final resume = progressAsync.value;
+    if (resume != null) {
+      _restorePosition(resume.currentPosition, resume.progressPercentage);
+    }
 
     final settings = ref.watch(readerSettingsProvider);
-    final media = MediaQuery.of(context);
-    final measure = Measure.forFontSize(settings.fontSize);
-    final horizontal = ((media.size.width - measure) / 2).clamp(
-      Space.lg,
-      double.infinity,
-    );
-
-    return Stack(
-      key: const ValueKey('reader-text'),
-      children: [
-        // 1. The page.
-        NotificationListener<UserScrollNotification>(
-          onNotification: _handleUserScroll,
-          child: NotificationListener<ScrollUpdateNotification>(
-            onNotification: (_) {
-              _onScroll();
-              return false;
-            },
-            child: GestureDetector(
-              // A tap that does not land on text toggles the chrome, the way a
-              // physical book has no chrome at all.
-              onTap: _toggleChrome,
-              behavior: HitTestBehavior.translucent,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                padding: EdgeInsets.only(
-                  left: horizontal,
-                  right: horizontal,
-                  top: media.padding.top + Space.huge,
-                  bottom: media.padding.bottom + Space.huge + Space.xxl,
-                ),
-                child: ExplainableText(
-                  text: content.text!,
-                  explainLabel: l10n.explain,
-                  highlightColor: context.semantics.explainHighlight,
-                  highlightStart: _explainedStart,
-                  highlightEnd: _explainedEnd,
-                  onExplain: _explainSelection,
-                  style: AppTypography.reading(
-                    fontSize: settings.fontSize,
-                    lineHeight: settings.lineHeight,
-                    color: palette.ink,
-                    serif: settings.typeface.isSerif,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-
-        // 2. Persistent, quiet position line.
-        _ReaderFooter(
-          palette: palette,
-          progress: _progress,
-          characterCount: _characterCount,
-          dimmed: _chromeVisible,
-        ),
-
-        // 3. Transient chrome.
-        _ReaderTopBar(
-          visible: _chromeVisible,
-          palette: palette,
-          title: content.title,
-          onBookmark: _addBookmark,
-          onBookmarks: _openBookmarks,
-          onSettings: _openSettings,
-        ),
-        _ReaderControls(
-          visible: _chromeVisible,
-          palette: palette,
-          progress: _progress,
-          characterCount: _characterCount,
-          onSeek: _seekTo,
-          onSeekEnd: _persistPosition,
-        ),
-
-        // 4. One-time teaching moment for the product's core interaction.
-        if (_showExplainHint)
-          _ExplainCoachMark(palette: palette, onDismiss: _dismissExplainHint),
-      ],
-    );
-  }
-}
-
-/// Top chrome: back, title, and the three reading actions.
-class _ReaderTopBar extends StatelessWidget {
-  const _ReaderTopBar({
-    required this.visible,
-    required this.palette,
-    required this.title,
-    required this.onBookmark,
-    required this.onBookmarks,
-    required this.onSettings,
-  });
-
-  final bool visible;
-  final ReadingPalette palette;
-  final String title;
-  final VoidCallback onBookmark;
-  final VoidCallback onBookmarks;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final textStyle =
+        theme.textTheme.bodyLarge?.copyWith(
+          fontSize: settings.fontSize,
+          height: settings.lineHeight,
+          letterSpacing: 0.05,
+        ) ??
+        TextStyle(fontSize: settings.fontSize, height: settings.lineHeight);
 
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: _Chrome(
-        visible: visible,
-        slideFrom: -1,
-        child: Container(
-          color: palette.canvas.withValues(alpha: 0.96),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: Space.sm,
-                vertical: Space.xs,
-              ),
-              child: Row(
+    return LayoutBuilder(
+      key: const ValueKey('text-reader'),
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth > 700;
+        final outerHorizontal = isWide ? 32.0 : 12.0;
+        final paperHorizontal = isWide ? 56.0 : 30.0;
+        const paperVertical = 34.0;
+        const footerHeight = 62.0;
+        final bookWidth = (constraints.maxWidth - outerHorizontal * 2).clamp(
+          1.0,
+          860.0,
+        );
+        final bookHeight = (constraints.maxHeight - 24 - footerHeight).clamp(
+          1.0,
+          double.infinity,
+        );
+        final textSize = Size(
+          (bookWidth - paperHorizontal * 2).clamp(1.0, double.infinity),
+          (bookHeight - paperVertical * 2).clamp(1.0, double.infinity),
+        );
+        final paginator = _ensurePaginator(
+          text: content.text!,
+          style: textStyle,
+          pageSize: textSize,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+          locale: Localizations.localeOf(context),
+        );
+
+        // The first readable page is prepared off the build phase; until then
+        // show a lightweight indicator instead of blocking on the whole book.
+        if (!paginator.hasFirstPage) {
+          return const Center(
+            key: ValueKey('reader-preparing'),
+            child: CircularProgressIndicator(),
+          );
+        }
+
+        final pageCount = paginator.pageCount;
+        final currentPage = _currentIndex.clamp(0, pageCount - 1);
+
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            outerHorizontal,
+            12,
+            outerHorizontal,
+            12,
+          ),
+          child: Center(
+            child: SizedBox(
+              width: bookWidth,
+              child: Column(
                 children: [
-                  IconButton(
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).backButtonTooltip,
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    color: palette.ink,
-                    onPressed: () => Navigator.of(context).maybePop(),
-                  ),
                   Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: palette.inkMuted,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: l10n.bookmarkThisPosition,
-                    icon: const Icon(Icons.bookmark_add_outlined),
-                    color: palette.ink,
-                    onPressed: onBookmark,
-                  ),
-                  IconButton(
-                    tooltip: l10n.bookmarks,
-                    icon: const Icon(Icons.bookmarks_outlined),
-                    color: palette.ink,
-                    onPressed: onBookmarks,
-                  ),
-                  IconButton(
-                    tooltip: l10n.readerSettings,
-                    icon: const Icon(Icons.text_fields_rounded),
-                    color: palette.ink,
-                    onPressed: onSettings,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Bottom chrome: a scrubber for coarse navigation.
-///
-/// The backend serves a book as one text blob with no chapter structure, so a
-/// table of contents is not possible yet; a scrubber gives the same "jump
-/// somewhere else" capability with the data that exists.
-class _ReaderControls extends StatelessWidget {
-  const _ReaderControls({
-    required this.visible,
-    required this.palette,
-    required this.progress,
-    required this.characterCount,
-    required this.onSeek,
-    required this.onSeekEnd,
-  });
-
-  final bool visible;
-  final ReadingPalette palette;
-  final double progress;
-  final int characterCount;
-  final ValueChanged<double> onSeek;
-  final VoidCallback onSeekEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final percent = (progress * 100).round();
-
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: _Chrome(
-        visible: visible,
-        slideFrom: 1,
-        child: Container(
-          decoration: BoxDecoration(
-            color: palette.canvas.withValues(alpha: 0.96),
-            border: Border(top: BorderSide(color: palette.hairline)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                Space.md,
-                Space.sm,
-                Space.md,
-                Space.sm,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${l10n.readerPercentRead(percent)}  ·  '
-                    '${_remainingLabel(l10n)}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: palette.inkMuted,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  Semantics(
-                    label: l10n.readerPosition,
-                    child: Slider(
-                      value: progress.clamp(0.0, 1.0),
-                      label: l10n.readerPercentRead(percent),
-                      semanticFormatterCallback: (value) =>
-                          l10n.readerPercentRead((value * 100).round()),
-                      onChanged: onSeek,
-                      onChangeEnd: (_) => onSeekEnd(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _remainingLabel(AppLocalizations l10n) {
-    final minutes = ReadingTime.minutesRemaining(characterCount, progress);
-    if (minutes == 0) {
-      return progress >= 0.999 ? l10n.readerFinished : l10n.readerAlmostDone;
-    }
-    return l10n.readerMinutesLeft(minutes);
-  }
-}
-
-/// The one piece of chrome that never leaves: how far in, how much left.
-class _ReaderFooter extends StatelessWidget {
-  const _ReaderFooter({
-    required this.palette,
-    required this.progress,
-    required this.characterCount,
-    required this.dimmed,
-  });
-
-  final ReadingPalette palette;
-  final double progress;
-  final int characterCount;
-
-  /// True while the full controls are showing, in which case this line steps
-  /// back to avoid saying the same thing twice.
-  final bool dimmed;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final percent = (progress * 100).round();
-    final minutes = ReadingTime.minutesRemaining(characterCount, progress);
-
-    final remaining = switch (minutes) {
-      0 when progress >= 0.999 => l10n.readerFinished,
-      0 => l10n.readerAlmostDone,
-      _ => l10n.readerMinutesLeft(minutes),
-    };
-
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: IgnorePointer(
-        child: AnimatedOpacity(
-          opacity: dimmed ? 0 : 1,
-          duration: Motion.of(context, Motion.base),
-          curve: Motion.standard,
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: Space.sm),
-              child: Text(
-                '${l10n.readerPercentRead(percent)}  ·  $remaining',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: palette.inkMuted,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Shared show/hide animation for the reader's chrome.
-class _Chrome extends StatelessWidget {
-  const _Chrome({
-    required this.visible,
-    required this.slideFrom,
-    required this.child,
-  });
-
-  final bool visible;
-
-  /// -1 slides up out of the top, 1 slides down out of the bottom.
-  final double slideFrom;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final duration = Motion.of(context, Motion.base);
-    return IgnorePointer(
-      ignoring: !visible,
-      child: AnimatedSlide(
-        offset: visible ? Offset.zero : Offset(0, slideFrom),
-        duration: duration,
-        curve: Motion.standard,
-        child: AnimatedOpacity(
-          opacity: visible ? 1 : 0,
-          duration: duration,
-          curve: Motion.standard,
-          child: child,
-        ),
-      ),
-    );
-  }
-}
-
-/// One-time coach mark that teaches the select → Explain gesture.
-class _ExplainCoachMark extends StatelessWidget {
-  const _ExplainCoachMark({required this.palette, required this.onDismiss});
-
-  final ReadingPalette palette;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final semantics = context.semantics;
-
-    return Positioned(
-      left: Space.base,
-      right: Space.base,
-      bottom: Space.huge + Space.base,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(
-          Space.base,
-          Space.md,
-          Space.sm,
-          Space.md,
-        ),
-        decoration: BoxDecoration(
-          color: semantics.surface,
-          borderRadius: Radii.all(Radii.lg),
-          border: Border.all(color: semantics.hairline),
-          boxShadow: Shadows.floating(semantics.shadow),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: Space.xxs),
-              child: Icon(
-                Icons.auto_awesome_rounded,
-                size: 20,
-                color: semantics.accent,
-              ),
-            ),
-            const SizedBox(width: Space.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.readerExplainHintTitle,
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: Space.xxs),
-                  Text(
-                    l10n.readerExplainHintBody,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: semantics.inkMuted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: Space.sm),
-            TextButton(
-              onPressed: onDismiss,
-              child: Text(l10n.readerExplainHintDismiss),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Skeleton-free, quiet loading state: a reader is about to read, not to watch
-/// a spinner, so this is deliberately minimal and centred.
-class _ReaderLoading extends StatelessWidget {
-  const _ReaderLoading({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: SizedBox(
-        width: 28,
-        height: 28,
-        child: CircularProgressIndicator(
-          strokeWidth: 2.5,
-          color: context.semantics.inkFaint,
-        ),
-      ),
-    );
-  }
-}
-
-/// Full-bleed message for reader-level errors and unsupported formats.
-class _ReaderMessage extends StatelessWidget {
-  const _ReaderMessage({
-    required this.icon,
-    required this.title,
-    this.message,
-    this.onRetry,
-    super.key,
-  });
-
-  final IconData icon;
-  final String title;
-  final String? message;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final semantics = context.semantics;
-
-    return SafeArea(
-      child: Stack(
-        children: [
-          Align(
-            alignment: Alignment.topLeft,
-            child: IconButton(
-              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-              icon: const Icon(Icons.arrow_back_rounded),
-              onPressed: () => Navigator.of(context).maybePop(),
-            ),
-          ),
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(Space.xxl),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, size: 32, color: semantics.inkFaint),
-                    const SizedBox(height: Space.base),
-                    Text(
-                      title,
-                      style: theme.textTheme.titleLarge,
-                      textAlign: TextAlign.center,
-                    ),
-                    if (message != null) ...[
-                      const SizedBox(height: Space.sm),
-                      Text(
-                        message!,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: semantics.inkMuted,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface,
+                        borderRadius: BorderRadius.circular(isWide ? 18 : 10),
+                        border: Border.all(
+                          color: theme.colorScheme.outlineVariant,
                         ),
-                        textAlign: TextAlign.center,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.ink.withValues(alpha: 0.10),
+                            blurRadius: 30,
+                            offset: const Offset(0, 14),
+                          ),
+                        ],
                       ),
-                    ],
-                    if (onRetry != null) ...[
-                      const SizedBox(height: Space.xl),
-                      OutlinedButton.icon(
-                        onPressed: onRetry,
-                        icon: const Icon(Icons.refresh_rounded, size: 18),
-                        label: Text(l10n.retry),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(isWide ? 18 : 10),
+                        child: PageTurnView(
+                          itemCount: pageCount,
+                          initialPage: currentPage,
+                          onPageChanged: (index) =>
+                              _onPageChanged(paginator, index),
+                          itemBuilder: (context, index) {
+                            final page = paginator.pageOrNull(index);
+                            if (page == null) {
+                              unawaited(paginator.ensureIndex(index));
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: paperHorizontal,
+                                vertical: paperVertical,
+                              ),
+                              child: PageBody(
+                                blocks: _composeBlocks(page),
+                                registry: _registry,
+                                explainLabel: l10n.explain,
+                                renderContext: _renderContext(theme, textStyle),
+                                onExplain: (selected) =>
+                                    _explainPageSelection(page, selected),
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ],
-                  ],
-                ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: footerHeight,
+                    child: Row(
+                      children: [
+                        // Flexible: a larger type size produces more pages, and
+                        // a four-digit count would otherwise overflow the
+                        // footer on a narrow phone.
+                        Flexible(
+                          child: Text(
+                            'Page ${currentPage + 1} of ${paginator.estimatedTotalPages}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        FilledButton.tonalIcon(
+                          onPressed: _explainCurrentPassage,
+                          icon: const Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 17,
+                          ),
+                          label: const Text('Explain'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _UnsupportedView extends StatelessWidget {
+  const _UnsupportedView({required this.message, super.key});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 440),
+          padding: const EdgeInsets.all(30),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(21),
+                ),
+                child: Icon(
+                  Icons.picture_as_pdf_outlined,
+                  size: 31,
+                  color: theme.colorScheme.secondary,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                message,
+                style: theme.textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Text-based PDF and plain-text files are supported. '
+                'Scanned or encrypted files may need OCR or a password first.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+int _paragraphStart(String text, int offset) {
+  if (text.isEmpty) return 0;
+  final safeOffset = offset.clamp(0, text.length);
+  final separator = text.lastIndexOf(
+    '\n\n',
+    safeOffset == 0 ? 0 : safeOffset - 1,
+  );
+  return separator == -1 ? 0 : separator + 2;
+}
+
+int _paragraphEnd(String text, int offset) {
+  if (text.isEmpty) return 0;
+  final separator = text.indexOf('\n\n', offset.clamp(0, text.length));
+  return separator == -1 ? text.length : separator;
+}
+
+String _passageAt(String text, int offset, {required int maxLength}) {
+  if (text.isEmpty) return '';
+  final codeUnitOffset = CharacterAnchor.toCodeUnit(text, offset);
+  final passage = text
+      .substring(
+        _paragraphStart(text, codeUnitOffset),
+        _paragraphEnd(text, codeUnitOffset),
+      )
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  final passageLength = CharacterAnchor.length(passage);
+  if (passageLength <= maxLength) return passage;
+  if (maxLength <= 1) return maxLength == 1 ? '…' : '';
+  return '${CharacterAnchor.substring(passage, 0, maxLength - 1).trimRight()}…';
+}
+
+class _ReaderError extends StatelessWidget {
+  const _ReaderError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_off_outlined, size: 52),
+          const SizedBox(height: 16),
+          Text(l10n.libraryLoadError),
+          const SizedBox(height: 18),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(l10n.retry),
           ),
         ],
       ),

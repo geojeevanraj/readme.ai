@@ -146,6 +146,38 @@ class _LibraryBody extends StatelessWidget {
         .firstOrNull;
     final showHero = continueBook != null && normalized.isEmpty;
 
+    // Wide viewports get breathing room, not longer rows: the column keeps its
+    // measure and centres, which is also what keeps the library legible when
+    // the app is used on a tablet or in a resized desktop window.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= Measure.wideBreakpoint;
+        return Padding(
+          padding: EdgeInsets.symmetric(horizontal: wide ? Space.md : 0),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: Measure.contentMaxWidth,
+              ),
+              child: _buildList(
+                context,
+                l10n,
+                visible,
+                showHero ? continueBook : null,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildList(
+    BuildContext context,
+    AppLocalizations l10n,
+    List<Book> visible,
+    Book? hero,
+  ) {
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
@@ -162,7 +194,7 @@ class _LibraryBody extends StatelessWidget {
             ),
           ),
 
-        if (showHero)
+        if (hero != null)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -172,9 +204,9 @@ class _LibraryBody extends StatelessWidget {
                 0,
               ),
               child: _ContinueReadingCard(
-                book: continueBook,
-                onRead: () => onRead(continueBook),
-                onDetails: () => onOpen(continueBook),
+                book: hero,
+                onRead: () => onRead(hero),
+                onDetails: () => onOpen(hero),
               ),
             ),
           ),
@@ -197,7 +229,7 @@ class _LibraryBody extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      showHero ? l10n.libraryAllBooks : l10n.libraryTitle,
+                      hero != null ? l10n.libraryAllBooks : l10n.libraryTitle,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),

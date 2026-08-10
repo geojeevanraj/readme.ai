@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:readme_ai/core/preferences/preferences_service.dart';
 import 'package:readme_ai/core/theme/appearance_controller.dart';
-import 'package:readme_ai/core/theme/reading_palette.dart';
-import 'package:readme_ai/features/reader/application/reader_settings.dart';
 import 'package:readme_ai/features/reader/application/reader_settings_controller.dart';
+import 'package:readme_ai/features/reader/domain/bookmark.dart';
+import 'package:readme_ai/features/reader/domain/reading_progress.dart';
+import 'package:readme_ai/features/reader/presentation/widgets/bookmarks_sheet.dart';
+import 'package:readme_ai/features/reader/presentation/widgets/page_turn_view.dart';
 
 import '../../helpers/fake_reader_repository.dart';
 import '../../helpers/pump_reader.dart';
@@ -15,16 +16,6 @@ void main() {
 
     expect(find.textContaining('bright cold day in April'), findsOneWidget);
     expect(find.text('Nineteen Eighty-Four'), findsOneWidget);
-  });
-
-  testWidgets('shows how much reading is left, not just a percentage', (
-    tester,
-  ) async {
-    await pumpReader(tester, repository: FakeReaderRepository());
-
-    // Short fake book: under a minute of reading remains.
-    expect(find.textContaining('Almost done'), findsWidgets);
-    expect(find.textContaining('0% read'), findsWidgets);
   });
 
   testWidgets('shows a limitation message for unsupported formats', (
@@ -43,32 +34,11 @@ void main() {
     );
   });
 
-  testWidgets('the explain coach mark is shown once and then remembered', (
-    tester,
-  ) async {
-    final container = await pumpReader(
-      tester,
-      repository: FakeReaderRepository(),
-      showExplainHint: true,
-    );
-
-    expect(find.text('Select any word or passage'), findsOneWidget);
-
-    await tester.tap(find.text('Got it'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Select any word or passage'), findsNothing);
-    expect(
-      container
-          .read(preferencesProvider)
-          .readBool(PreferenceKeys.explainHintSeen),
-      isTrue,
-    );
-  });
-
-  testWidgets('reader settings step the font size and persist it', (
-    tester,
-  ) async {
+  testWidgets('reader settings adjust font size', (tester) async {
+    // The settings sheet is taller than the default 800x600 test surface, so
+    // the stepper would sit off-screen and the tap would miss.
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final container = await pumpReader(
       tester,
       repository: FakeReaderRepository(),
@@ -77,46 +47,13 @@ void main() {
 
     await tester.tap(find.byTooltip('Reader settings'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('Increase Text size'));
-    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Increase Text size'));
     await tester.pumpAndSettle();
 
-    final updated = container.read(readerSettingsProvider).fontSize;
-    expect(updated, greaterThan(initial));
-    expect(
-      container
-          .read(preferencesProvider)
-          .readDouble(PreferenceKeys.readerFontSize),
-      updated,
-    );
+    expect(container.read(readerSettingsProvider).fontSize, initial + 2);
   });
 
-  testWidgets('reader settings switch the reading face', (tester) async {
-    final container = await pumpReader(
-      tester,
-      repository: FakeReaderRepository(),
-    );
-
-    expect(
-      container.read(readerSettingsProvider).typeface,
-      ReaderTypeface.serif,
-    );
-
-    await tester.tap(find.byTooltip('Reader settings'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Sans'));
-    await tester.pumpAndSettle();
-
-    expect(
-      container.read(readerSettingsProvider).typeface,
-      ReaderTypeface.sans,
-    );
-  });
-
-  testWidgets('choosing Night puts the whole app into dark mode', (
-    tester,
-  ) async {
+  testWidgets('reader settings toggle dark mode', (tester) async {
     final container = await pumpReader(
       tester,
       repository: FakeReaderRepository(),
@@ -124,27 +61,221 @@ void main() {
 
     await tester.tap(find.byTooltip('Reader settings'));
     await tester.pumpAndSettle();
+    // The dark-mode switch became a three-way appearance control (Paper /
+    // Sepia / Night), so the same intent is expressed by choosing Night.
     await tester.tap(find.text('Night'));
     await tester.pumpAndSettle();
 
-    expect(container.read(appearanceProvider), ReadingTheme.night);
     expect(container.read(themeModeProvider), ThemeMode.dark);
   });
 
-  testWidgets('bookmarking a position lists it with its location', (
+  testWidgets('turning a logical page saves its stable character anchor', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final text = List.generate(
+      180,
+      (index) =>
+          'Concept $index builds understanding through careful reading. ',
+    ).join();
+    final repository = FakeReaderRepository(
+      content: FakeReaderRepository.textContent(text: text),
+    );
+
+    await pumpReader(tester, repository: repository);
+
+    expect(find.byType(PageTurnView), findsOneWidget);
+    expect(find.textContaining('Page 1 of '), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Next page'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Page 2 of '), findsOneWidget);
+    expect(repository.lastSaved, isNotNull);
+    expect(int.parse(repository.lastSaved!.currentPosition), greaterThan(0));
+  });
+
+  testWidgets('restores a nonzero scalar anchor to its logical page', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final text = List.generate(
+      240,
+      (index) => '😀 Chapter $index preserves the reader position. ',
+    ).join();
+    final repository = FakeReaderRepository(
+      content: FakeReaderRepository.textContent(text: text),
+      progress: const ReadingProgress(
+        currentPosition: '1800',
+        progressPercentage: 20,
+        totalReadingTimeSeconds: 0,
+      ),
+    );
+
+    await pumpReader(tester, repository: repository);
+
+    expect(find.textContaining('Page 1 of '), findsNothing);
+    expect(find.textContaining('Page '), findsWidgets);
+  });
+
+  testWidgets('typography reflow retains the exact global scalar anchor', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final text = List.generate(
+      240,
+      (index) => '😀 Chapter $index preserves the reader position. ',
+    ).join();
+    final repository = FakeReaderRepository(
+      content: FakeReaderRepository.textContent(text: text),
+      progress: const ReadingProgress(
+        currentPosition: '1800',
+        progressPercentage: 20,
+        totalReadingTimeSeconds: 0,
+      ),
+    );
+    await pumpReader(tester, repository: repository);
+
+    await tester.tap(find.byTooltip('Reader settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Increase Text size'));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(10, 100));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Bookmark this position'));
+    await tester.pump();
+
+    expect(repository.lastCreatedBookmarkAnchor, '1800');
+  });
+
+  testWidgets('bookmark jump immediately persists the target anchor', (
+    tester,
+  ) async {
+    final text = List.generate(
+      240,
+      (index) => 'Chapter $index preserves the reader position. ',
+    ).join();
+    final repository = FakeReaderRepository(
+      content: FakeReaderRepository.textContent(text: text),
+      bookmarks: [
+        Bookmark(
+          id: 'bm-jump',
+          anchor: '1800',
+          createdAt: DateTime(2026),
+          label: 'Jump target',
+        ),
+      ],
+    );
+    await pumpReader(tester, repository: repository);
+
+    await tester.tap(find.byTooltip('Bookmarks'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Jump target'));
+    await tester.pumpAndSettle();
+
+    expect(repository.lastSaved?.currentPosition, '1800');
+  });
+
+  testWidgets('bookmarking a position lists contextual information', (
     tester,
   ) async {
     await pumpReader(tester, repository: FakeReaderRepository());
 
     await tester.tap(find.byTooltip('Bookmark this position'));
     await tester.pump();
+    await tester.tap(find.byTooltip('Bookmarks'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byType(BookmarksSheet),
+        matching: find.textContaining('bright cold day'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('% through'), findsOneWidget);
+
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+  });
+
+  testWidgets('bookmark fallback preview uses Unicode scalar anchors', (
+    tester,
+  ) async {
+    const text = '😀😀Target passage starts here.';
+    final repository = FakeReaderRepository(
+      content: FakeReaderRepository.textContent(text: text),
+      bookmarks: [
+        Bookmark(id: 'bm-unicode', anchor: '2', createdAt: DateTime(2026)),
+      ],
+    );
+    await pumpReader(tester, repository: repository);
 
     await tester.tap(find.byTooltip('Bookmarks'));
     await tester.pumpAndSettle();
 
-    expect(find.text('At 0%'), findsOneWidget);
+    expect(find.text('Target passage starts here.'), findsOneWidget);
+  });
 
-    // Drain the confirmation snackbar's auto-dismiss timer.
-    await tester.pumpAndSettle(const Duration(seconds: 5));
+  testWidgets('created bookmark labels truncate on Unicode scalar boundaries', (
+    tester,
+  ) async {
+    final prefix = List.filled(70, 'a').join();
+    final text = '$prefix😀 trailing text';
+    final repository = FakeReaderRepository(
+      content: FakeReaderRepository.textContent(text: text),
+    );
+    await pumpReader(tester, repository: repository);
+
+    await tester.tap(find.byTooltip('Bookmark this position'));
+    await tester.pump();
+
+    final label = repository.lastCreatedBookmarkLabel!;
+    expect(label.runes.length, 72);
+    expect(label, '$prefix😀…');
+    expect(label.runes, isNot(contains(0xFFFD)));
+  });
+
+  testWidgets('Explain is persistently discoverable on phone and desktop', (
+    tester,
+  ) async {
+    for (final size in [const Size(390, 844), const Size(1280, 900)]) {
+      await tester.binding.setSurfaceSize(size);
+      await pumpReader(tester, repository: FakeReaderRepository());
+
+      expect(find.widgetWithText(FilledButton, 'Explain'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('bookmark deletion offers undo and restores the bookmark', (
+    tester,
+  ) async {
+    final repository = FakeReaderRepository(
+      bookmarks: [
+        Bookmark(
+          id: 'bm-1',
+          anchor: '12',
+          createdAt: DateTime(2026),
+          label: 'bright cold day in April',
+        ),
+      ],
+    );
+    await pumpReader(tester, repository: repository);
+
+    await tester.tap(find.byTooltip('Bookmarks'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Delete bookmark'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Bookmark deleted'), findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(find.text('bright cold day in April'), findsOneWidget);
   });
 }

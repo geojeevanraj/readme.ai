@@ -1,190 +1,238 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/app_semantics.dart';
-import '../../../../core/theme/app_tokens.dart';
-import '../../../../l10n/generated/app_localizations.dart';
 import '../../application/reader_controller.dart';
 import '../../application/reader_providers.dart';
 import '../../domain/bookmark.dart';
+import '../../domain/character_anchor.dart';
 
 /// Bottom sheet listing the book's saved positions.
-///
-/// Every entry answers "what is this?" before "where is this?": a saved
-/// explanation shows the passage it was about, a plain bookmark shows how far
-/// into the book it sits. Deleting is undoable, because a mis-tap on a small
-/// delete button should not destroy something silently.
-class BookmarksSheet extends ConsumerWidget {
+class BookmarksSheet extends ConsumerStatefulWidget {
   const BookmarksSheet({
     required this.bookId,
-    required this.characterCount,
     required this.onJump,
+    this.contentText,
+    this.characterCount = 0,
     super.key,
   });
 
   final String bookId;
-
-  /// Total characters in the book, used to express an anchor as a percentage.
-  final int characterCount;
-
   final void Function(Bookmark) onJump;
+  final String? contentText;
+  final int characterCount;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final semantics = context.semantics;
-    final bookmarks = ref.watch(bookmarksProvider(bookId));
-
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.7,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, 0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    l10n.bookmarks,
-                    style: theme.textTheme.titleLarge,
-                  ),
-                ),
-                IconButton(
-                  tooltip: l10n.close,
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  icon: const Icon(Icons.close_rounded, size: 20),
-                ),
-              ],
-            ),
-            const SizedBox(height: Space.sm),
-            Flexible(
-              child: switch (bookmarks) {
-                AsyncValue(hasValue: true, value: final items?)
-                    when items.isEmpty =>
-                  _BookmarksMessage(
-                    icon: Icons.bookmark_add_outlined,
-                    title: l10n.bookmarksEmptyTitle,
-                    message: l10n.bookmarksEmptyMessage,
-                  ),
-                AsyncValue(hasValue: true, value: final items?) =>
-                  ListView.separated(
-                    padding: const EdgeInsets.only(bottom: Space.lg),
-                    shrinkWrap: true,
-                    itemCount: items.length,
-                    separatorBuilder: (_, _) =>
-                        Divider(color: semantics.hairline, height: 1),
-                    itemBuilder: (context, index) => _BookmarkRow(
-                      bookmark: items[index],
-                      characterCount: characterCount,
-                      onTap: () => onJump(items[index]),
-                      onDelete: () => _delete(context, ref, items[index]),
-                    ),
-                  ),
-                AsyncValue(hasError: true) => _BookmarksMessage(
-                  icon: Icons.cloud_off_rounded,
-                  title: l10n.bookmarksLoadError,
-                  message: l10n.connectionHint,
-                  retryLabel: l10n.retry,
-                  onRetry: () => ref.invalidate(bookmarksProvider(bookId)),
-                ),
-                _ => const Padding(
-                  padding: EdgeInsets.symmetric(vertical: Space.xxl),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _delete(
-    BuildContext context,
-    WidgetRef ref,
-    Bookmark bookmark,
-  ) async {
-    final l10n = AppLocalizations.of(context);
-    final messenger = ScaffoldMessenger.of(context);
-    final controller = ref.read(readerControllerProvider);
-
-    await controller.deleteBookmark(bookId, bookmark.id);
-
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(l10n.bookmarkDeleted),
-          action: SnackBarAction(
-            label: l10n.undo,
-            // The API has no restore endpoint, so undo re-creates the bookmark
-            // at the same anchor with the same label — indistinguishable to the
-            // reader, and honest about what the backend supports.
-            onPressed: () => controller.addBookmark(
-              bookId,
-              anchor: bookmark.anchor,
-              label: bookmark.label,
-            ),
-          ),
-        ),
-      );
-  }
+  ConsumerState<BookmarksSheet> createState() => _BookmarksSheetState();
 }
 
-class _BookmarkRow extends StatelessWidget {
-  const _BookmarkRow({
-    required this.bookmark,
-    required this.characterCount,
-    required this.onTap,
-    required this.onDelete,
-  });
-
-  final Bookmark bookmark;
-  final int characterCount;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
+class _BookmarksSheetState extends ConsumerState<BookmarksSheet> {
+  Bookmark? _deletedBookmark;
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
+    final bookmarks = ref.watch(bookmarksProvider(widget.bookId));
     final theme = Theme.of(context);
-    final semantics = context.semantics;
 
-    final label = bookmark.label?.trim();
-    final hasExcerpt = label != null && label.isNotEmpty;
-    final anchor = int.tryParse(bookmark.anchor) ?? 0;
-    final percent = characterCount <= 0
-        ? 0
-        : ((anchor / characterCount) * 100).clamp(0, 100).round();
-
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(vertical: Space.xs),
-      onTap: onTap,
-      leading: Icon(
-        hasExcerpt ? Icons.auto_awesome_rounded : Icons.bookmark_rounded,
-        size: 20,
-        color: hasExcerpt ? semantics.accent : semantics.inkFaint,
-      ),
-      title: Text(
-        hasExcerpt ? '“$label”' : l10n.bookmarkAt(percent),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontStyle: hasExcerpt ? FontStyle.italic : FontStyle.normal,
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(
+                      Icons.bookmarks_rounded,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Bookmarks', style: theme.textTheme.titleLarge),
+                        Text(
+                          'Saved places in this book',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close bookmarks',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              if (_deletedBookmark != null) ...[
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline_rounded,
+                        color: theme.colorScheme.onSecondaryContainer,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(child: Text('Bookmark deleted')),
+                      TextButton(
+                        onPressed: _undoDelete,
+                        child: const Text('Undo'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Flexible(
+                child: bookmarks.when(
+                  loading: () => const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: CircularProgressIndicator(),
+                  ),
+                  error: (_, _) => const _BookmarksMessage(
+                    icon: Icons.cloud_off_outlined,
+                    title: "Couldn't load bookmarks.",
+                    message: 'Close this sheet and try again.',
+                  ),
+                  data: (items) => items.isEmpty
+                      ? const _BookmarksMessage(
+                          icon: Icons.bookmark_add_outlined,
+                          title: 'No bookmarks yet.',
+                          message:
+                              'Tap the bookmark icon while reading to save your place.',
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: items.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final bookmark = items[index];
+                            return Material(
+                              color: theme.colorScheme.surface,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color: theme.colorScheme.outlineVariant,
+                                ),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.only(
+                                  left: 14,
+                                  right: 6,
+                                  top: 5,
+                                  bottom: 5,
+                                ),
+                                leading: Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.secondaryContainer,
+                                    borderRadius: BorderRadius.circular(11),
+                                  ),
+                                  child: Icon(
+                                    Icons.bookmark_rounded,
+                                    size: 19,
+                                    color: theme.colorScheme.secondary,
+                                  ),
+                                ),
+                                title: Text(
+                                  _bookmarkLabel(bookmark),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  '${_bookmarkPercentage(bookmark)}% through · '
+                                  'Tap to continue',
+                                ),
+                                onTap: () => widget.onJump(bookmark),
+                                trailing: IconButton(
+                                  tooltip: 'Delete bookmark',
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: () => _deleteWithUndo(bookmark),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      subtitle: hasExcerpt ? Text(l10n.bookmarkAt(percent)) : null,
-      trailing: IconButton(
-        tooltip: l10n.delete,
-        icon: const Icon(Icons.delete_outline_rounded, size: 20),
-        onPressed: onDelete,
-      ),
     );
+  }
+
+  String _bookmarkLabel(Bookmark bookmark) {
+    final supplied = bookmark.label?.trim();
+    if (supplied != null && supplied.isNotEmpty) return supplied;
+
+    final text = widget.contentText;
+    final offset = int.tryParse(bookmark.anchor);
+    if (text == null || text.isEmpty || offset == null) {
+      return 'Saved reading place';
+    }
+    final safeOffset = offset.clamp(0, CharacterAnchor.length(text));
+    final end = (safeOffset + 72).clamp(
+      safeOffset,
+      CharacterAnchor.length(text),
+    );
+    final excerpt = CharacterAnchor.substring(
+      text,
+      safeOffset,
+      end,
+    ).replaceAll(RegExp(r'\s+'), ' ').trim();
+    return excerpt.isEmpty ? 'Saved reading place' : excerpt;
+  }
+
+  int _bookmarkPercentage(Bookmark bookmark) {
+    if (widget.characterCount <= 0) return 0;
+    final offset = int.tryParse(bookmark.anchor) ?? 0;
+    return ((offset.clamp(0, widget.characterCount) / widget.characterCount) *
+            100)
+        .round();
+  }
+
+  Future<void> _deleteWithUndo(Bookmark bookmark) async {
+    final controller = ref.read(readerControllerProvider);
+    await controller.deleteBookmark(widget.bookId, bookmark.id);
+    if (mounted) setState(() => _deletedBookmark = bookmark);
+  }
+
+  Future<void> _undoDelete() async {
+    final bookmark = _deletedBookmark;
+    if (bookmark == null) return;
+    await ref
+        .read(readerControllerProvider)
+        .addBookmark(
+          widget.bookId,
+          anchor: bookmark.anchor,
+          label: bookmark.label,
+        );
+    if (mounted) setState(() => _deletedBookmark = null);
   }
 }
 
@@ -193,52 +241,34 @@ class _BookmarksMessage extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.message,
-    this.retryLabel,
-    this.onRetry,
   });
 
   final IconData icon;
   final String title;
   final String message;
-  final String? retryLabel;
-  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final semantics = context.semantics;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: Space.md,
-        vertical: Space.xxl,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 28, color: semantics.inkFaint),
-          const SizedBox(height: Space.md),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium,
-          ),
-          const SizedBox(height: Space.xs),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: semantics.inkMuted,
-            ),
-          ),
-          if (onRetry != null) ...[
-            const SizedBox(height: Space.base),
-            OutlinedButton(
-              onPressed: onRetry,
-              child: Text(retryLabel ?? message),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 48, color: theme.colorScheme.primary),
+            const SizedBox(height: 16),
+            Text(title, style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
