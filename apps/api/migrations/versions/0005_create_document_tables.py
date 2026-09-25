@@ -69,12 +69,12 @@ def _create_documents() -> None:
             ["processed_book_id"], ["processed_books.id"], ondelete="CASCADE"
         ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("processed_book_id"),
     )
     op.create_index(
         "ix_documents_processed_book_id",
         "documents",
         ["processed_book_id"],
+        unique=True,
     )
 
 
