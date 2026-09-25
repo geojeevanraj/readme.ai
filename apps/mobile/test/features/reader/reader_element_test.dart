@@ -47,7 +47,10 @@ void main() {
     test('intersect clips to the overlapping part, or returns null', () {
       const span = ReaderSpan(10, 20);
 
-      expect(span.intersect(const ReaderSpan(15, 40)), const ReaderSpan(15, 20));
+      expect(
+        span.intersect(const ReaderSpan(15, 40)),
+        const ReaderSpan(15, 20),
+      );
       expect(span.intersect(const ReaderSpan(0, 12)), const ReaderSpan(10, 12));
       expect(span.intersect(const ReaderSpan(0, 40)), span);
       expect(span.intersect(const ReaderSpan(20, 30)), isNull);
@@ -266,22 +269,25 @@ void main() {
       expect(structural.any((element) => element.isReadable), isFalse);
     });
 
-    test('elements carry source page metadata without it affecting hierarchy', () {
-      const element = ParagraphElement(
-        id: 'a',
-        parentId: 'sec',
-        orderIndex: 2,
-        sequence: 9,
-        span: ReaderSpan(100, 200),
-        pageNumber: 42,
-      );
+    test(
+      'elements carry source page metadata without it affecting hierarchy',
+      () {
+        const element = ParagraphElement(
+          id: 'a',
+          parentId: 'sec',
+          orderIndex: 2,
+          sequence: 9,
+          span: ReaderSpan(100, 200),
+          pageNumber: 42,
+        );
 
-      expect(element.pageNumber, 42);
-      // Hierarchy comes from parentId/orderIndex/sequence only.
-      expect(element.parentId, 'sec');
-      expect(element.orderIndex, 2);
-      expect(element.sequence, 9);
-    });
+        expect(element.pageNumber, 42);
+        // Hierarchy comes from parentId/orderIndex/sequence only.
+        expect(element.parentId, 'sec');
+        expect(element.orderIndex, 2);
+        expect(element.sequence, 9);
+      },
+    );
 
     test('span-less elements expose a null span', () {
       const image = ImageElement(

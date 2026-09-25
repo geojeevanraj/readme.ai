@@ -37,13 +37,14 @@ const _image = ImageElement(
   pageNumber: 12,
 );
 
-RenderBlock _imageBlock({String? caption, ImageElement? element}) => RenderBlock(
-  kind: ReaderElementKind.image,
-  visibleSpan: const ReaderSpan(100, 100),
-  text: '',
-  element: element ?? _image,
-  caption: caption,
-);
+RenderBlock _imageBlock({String? caption, ImageElement? element}) =>
+    RenderBlock(
+      kind: ReaderElementKind.image,
+      visibleSpan: const ReaderSpan(100, 100),
+      text: '',
+      element: element ?? _image,
+      caption: caption,
+    );
 
 RenderBlock _tableBlock({String? caption, int rowCount = 3}) => RenderBlock(
   kind: ReaderElementKind.table,
@@ -138,7 +139,9 @@ void main() {
       expect(find.textContaining('deadbeefca\u2026'), findsOneWidget);
     });
 
-    testWidgets('marks itself provisional and fetches no bytes', (tester) async {
+    testWidgets('marks itself provisional and fetches no bytes', (
+      tester,
+    ) async {
       await _pump(tester, [_imageBlock(caption: 'Figure 1')]);
 
       expect(find.textContaining('later update'), findsOneWidget);
@@ -167,10 +170,7 @@ void main() {
         find.textContaining('Table 3', findRichText: true),
         findsOneWidget,
       );
-      expect(
-        find.textContaining('3 rows', findRichText: true),
-        findsOneWidget,
-      );
+      expect(find.textContaining('3 rows', findRichText: true), findsOneWidget);
     });
 
     testWidgets('uses singular phrasing for one row', (tester) async {
@@ -201,9 +201,7 @@ void main() {
     testWidgets('image placeholder stays within its bounds', (tester) async {
       await _pump(tester, [_imageBlock(caption: 'Figure 5')]);
 
-      final size = tester.getSize(
-        find.byType(Container).first,
-      );
+      final size = tester.getSize(find.byType(Container).first);
       expect(
         size.height,
         greaterThanOrEqualTo(
@@ -260,23 +258,26 @@ void main() {
       final size = tester.getSize(find.byType(Container).first);
       expect(
         size.height,
-        greaterThanOrEqualTo(24 * ImagePlaceholderRenderer.minHeightFactor - 0.01),
+        greaterThanOrEqualTo(
+          24 * ImagePlaceholderRenderer.minHeightFactor - 0.01,
+        ),
       );
     });
 
     testWidgets('neither placeholder overflows a narrow page', (tester) async {
-      await _pump(
-        tester,
-        [_imageBlock(caption: 'Figure 5'), _tableBlock(caption: 'Table 2')],
-        width: 200,
-      );
+      await _pump(tester, [
+        _imageBlock(caption: 'Figure 5'),
+        _tableBlock(caption: 'Table 2'),
+      ], width: 200);
 
       expect(tester.takeException(), isNull);
     });
   });
 
   group('accessibility', () {
-    testWidgets('image placeholder announces itself as an image', (tester) async {
+    testWidgets('image placeholder announces itself as an image', (
+      tester,
+    ) async {
       final handle = tester.ensureSemantics();
       await _pump(tester, [_imageBlock(caption: 'Figure 5. The pipeline')]);
 
@@ -333,11 +334,15 @@ void main() {
       ];
 
       await _pump(tester, blocks);
-      final first = tester.allWidgets.map((w) => w.runtimeType.toString()).toList();
+      final first = tester.allWidgets
+          .map((w) => w.runtimeType.toString())
+          .toList();
       final firstHeight = tester.getSize(find.byType(Column).first).height;
 
       await _pump(tester, blocks);
-      final second = tester.allWidgets.map((w) => w.runtimeType.toString()).toList();
+      final second = tester.allWidgets
+          .map((w) => w.runtimeType.toString())
+          .toList();
       final secondHeight = tester.getSize(find.byType(Column).first).height;
 
       expect(second, first);
@@ -346,7 +351,9 @@ void main() {
   });
 
   group('unknown element polish', () {
-    testWidgets('renders as ordinary prose, not as a marked gap', (tester) async {
+    testWidgets('renders as ordinary prose, not as a marked gap', (
+      tester,
+    ) async {
       await _pump(tester, [
         const RenderBlock(
           kind: ReaderElementKind.unknown,
@@ -362,7 +369,9 @@ void main() {
       expect(text.style!.fontStyle, isNot(FontStyle.italic));
     });
 
-    testWidgets('a whitespace-only block renders nothing at all', (tester) async {
+    testWidgets('a whitespace-only block renders nothing at all', (
+      tester,
+    ) async {
       await _pump(tester, [
         const RenderBlock(
           kind: ReaderElementKind.unknown,

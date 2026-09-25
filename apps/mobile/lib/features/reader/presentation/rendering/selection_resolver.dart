@@ -128,10 +128,7 @@ class SelectionResolver {
 
     final hintCodeUnit = CharacterAnchor.toCodeUnit(
       pageText,
-      (hintOffset - pageStartOffset).clamp(
-        0,
-        CharacterAnchor.length(pageText),
-      ),
+      (hintOffset - pageStartOffset).clamp(0, CharacterAnchor.length(pageText)),
     );
     return _nearest(matches, hintCodeUnit);
   }

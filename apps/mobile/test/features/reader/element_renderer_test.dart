@@ -127,7 +127,11 @@ void main() {
       final registry = ElementRendererRegistry.standard();
 
       for (final kind in ReaderElementKind.values) {
-        expect(registry.rendererFor(_block(kind)), isNotNull, reason: kind.name);
+        expect(
+          registry.rendererFor(_block(kind)),
+          isNotNull,
+          reason: kind.name,
+        );
       }
     });
 
@@ -186,7 +190,9 @@ void main() {
   });
 
   group('spacing ownership', () {
-    testWidgets('PageBody inserts exactly one gap per adjacency', (tester) async {
+    testWidgets('PageBody inserts exactly one gap per adjacency', (
+      tester,
+    ) async {
       await _pump(tester, [
         _block(ReaderElementKind.paragraph, text: 'One.'),
         _block(ReaderElementKind.paragraph, text: 'Two.'),
@@ -249,7 +255,11 @@ void main() {
       await _pump(tester, [
         _block(ReaderElementKind.paragraph, text: 'First.'),
         _block(ReaderElementKind.paragraph, text: 'Second.'),
-        _block(ReaderElementKind.listItem, text: 'Item', marker: BlockMarker.bullet),
+        _block(
+          ReaderElementKind.listItem,
+          text: 'Item',
+          marker: BlockMarker.bullet,
+        ),
       ], spacing: noSpacing);
 
       final first = tester.getRect(find.text('First.'));
@@ -293,8 +303,16 @@ void main() {
       tester,
     ) async {
       await _pump(tester, [
-        _block(ReaderElementKind.chapter, title: 'Chapter One', text: 'Chapter One'),
-        _block(ReaderElementKind.section, title: 'Foundations', text: 'Foundations'),
+        _block(
+          ReaderElementKind.chapter,
+          title: 'Chapter One',
+          text: 'Chapter One',
+        ),
+        _block(
+          ReaderElementKind.section,
+          title: 'Foundations',
+          text: 'Foundations',
+        ),
         _block(ReaderElementKind.paragraph, text: 'Body.'),
       ]);
 
@@ -383,10 +401,7 @@ void main() {
 
       final padding = tester.widget<Padding>(
         find
-            .ancestor(
-              of: find.text('Nested'),
-              matching: find.byType(Padding),
-            )
+            .ancestor(of: find.text('Nested'), matching: find.byType(Padding))
             .last,
       );
       expect((padding.padding as EdgeInsets).left, greaterThan(0));
@@ -498,24 +513,20 @@ void main() {
       tester,
     ) async {
       final tapped = <String>[];
-      await _pump(
-        tester,
-        [
-          _block(
-            ReaderElementKind.hyperlink,
-            text: 'Reference',
-            element: const HyperlinkElement(
-              id: 'h',
-              parentId: 'sec',
-              orderIndex: 0,
-              sequence: 0,
-              target: 'https://example.test/ref',
-              label: 'Reference',
-            ),
+      await _pump(tester, [
+        _block(
+          ReaderElementKind.hyperlink,
+          text: 'Reference',
+          element: const HyperlinkElement(
+            id: 'h',
+            parentId: 'sec',
+            orderIndex: 0,
+            sequence: 0,
+            target: 'https://example.test/ref',
+            label: 'Reference',
           ),
-        ],
-        onLinkTap: tapped.add,
-      );
+        ),
+      ], onLinkTap: tapped.add);
 
       final link = tester.widget<Text>(find.byType(Text));
       final span = link.textSpan! as TextSpan;
@@ -540,18 +551,20 @@ void main() {
         _block(ReaderElementKind.chapter, title: 'Chapter One'),
         _block(ReaderElementKind.paragraph, text: 'Body.'),
         _block(ReaderElementKind.codeBlock, text: 'SELECT 1;'),
-        _block(ReaderElementKind.listItem, text: 'Item', marker: BlockMarker.bullet),
+        _block(
+          ReaderElementKind.listItem,
+          text: 'Item',
+          marker: BlockMarker.bullet,
+        ),
       ];
 
       await _pump(tester, blocks);
-      final first = tester
-          .allWidgets
+      final first = tester.allWidgets
           .map((widget) => widget.runtimeType.toString())
           .toList();
 
       await _pump(tester, blocks);
-      final second = tester
-          .allWidgets
+      final second = tester.allWidgets
           .map((widget) => widget.runtimeType.toString())
           .toList();
 

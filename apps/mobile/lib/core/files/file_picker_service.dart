@@ -7,7 +7,11 @@ import 'picked_book.dart';
 String bookMimeType(String filename) {
   final normalized = filename.toLowerCase();
   if (normalized.endsWith('.pdf')) return 'application/pdf';
+  if (normalized.endsWith('.epub')) return 'application/epub+zip';
   if (normalized.endsWith('.txt')) return 'text/plain';
+  if (normalized.endsWith('.md') || normalized.endsWith('.markdown')) {
+    return 'text/markdown';
+  }
   return 'application/octet-stream';
 }
 
@@ -26,7 +30,7 @@ class FilePickerServiceImpl implements FilePickerService {
   Future<PickedBook?> pickBook() async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const ['pdf', 'txt'],
+      allowedExtensions: const ['pdf', 'epub', 'txt', 'md', 'markdown'],
       withData: true,
     );
     final file = result?.files.singleOrNull;

@@ -28,7 +28,9 @@ class CodeBlockRenderer extends KindRenderer {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: render.colors.surface,
-        border: Border(left: BorderSide(color: render.colors.outline, width: 3)),
+        border: Border(
+          left: BorderSide(color: render.colors.outline, width: 3),
+        ),
       ),
       // Inner padding is part of the block's own appearance, not inter-block
       // rhythm, so it does not violate the single-owner spacing rule.

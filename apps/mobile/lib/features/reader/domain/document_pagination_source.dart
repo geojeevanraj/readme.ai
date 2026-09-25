@@ -61,7 +61,8 @@ class DocumentPaginationSource implements PaginationSource {
 
   final StringPaginationSource _text;
   final DocumentOutline _outline;
-  final PaginationSourceDiagnostics _diagnostics = PaginationSourceDiagnostics();
+  final PaginationSourceDiagnostics _diagnostics =
+      PaginationSourceDiagnostics();
 
   /// Structural access for the composer. Not part of [PaginationSource].
   DocumentOutline get outline => _outline;

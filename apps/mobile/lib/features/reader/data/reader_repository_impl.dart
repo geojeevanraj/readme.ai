@@ -5,6 +5,7 @@ import '../domain/bookmark.dart';
 import '../domain/element_window.dart';
 import '../domain/reader_repository.dart';
 import '../domain/reading_progress.dart';
+import '../domain/recent_read.dart';
 import 'element_dtos.dart';
 import 'reader_dtos.dart';
 
@@ -70,6 +71,18 @@ class ReaderRepositoryImpl implements ReaderRepository {
       },
     );
     return ReadingProgressDto.fromJson(response.data!).toDomain();
+  }
+
+  @override
+  Future<List<RecentRead>> listRecent() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/reading/recent',
+    );
+    final items = (response.data?['items'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
+    return items
+        .map((json) => RecentReadDto.fromJson(json).toDomain())
+        .toList();
   }
 
   @override

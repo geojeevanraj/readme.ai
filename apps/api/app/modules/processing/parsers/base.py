@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from app.modules.processing.document import DocumentMetadata
+from app.modules.processing.document import CoverImage, DocumentMetadata
 from app.modules.processing.document_model import Document, ElementType
 from app.modules.processing.enums import ProcessingErrorCode
 
@@ -226,6 +226,8 @@ class ParseResult:
     warnings: tuple[ParserIssue, ...] = ()
     errors: tuple[ParserIssue, ...] = ()
     extra: dict[str, str] = field(default_factory=dict)
+    #: The book's own cover picture, when the source format carries one.
+    cover: CoverImage | None = None
 
 
 @runtime_checkable

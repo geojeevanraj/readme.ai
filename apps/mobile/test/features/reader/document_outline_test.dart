@@ -238,26 +238,27 @@ void main() {
       expect(repository.requests, hasLength(2));
     });
 
-    test('an element straddling a boundary resolves once, from either side', () async {
-      // The same element is delivered in both chunks, as the API does.
-      final straddling = _paragraph(
-        'straddle',
-        _chunk - 20,
-        _chunk + 20,
-        sequence: 100,
-      );
-      final repository = _OutlineRepository(
-        build: (offset) => [straddling],
-      );
-      final outline = _outline(repository);
+    test(
+      'an element straddling a boundary resolves once, from either side',
+      () async {
+        // The same element is delivered in both chunks, as the API does.
+        final straddling = _paragraph(
+          'straddle',
+          _chunk - 20,
+          _chunk + 20,
+          sequence: 100,
+        );
+        final repository = _OutlineRepository(build: (offset) => [straddling]);
+        final outline = _outline(repository);
 
-      await outline.ensureRange(_chunk - 20, _chunk + 20);
-      final elements = outline.elementsIn(_chunk - 20, _chunk + 20);
+        await outline.ensureRange(_chunk - 20, _chunk + 20);
+        final elements = outline.elementsIn(_chunk - 20, _chunk + 20);
 
-      expect(elements, hasLength(1));
-      expect(outline.readableElementAt(_chunk - 1)?.id, 'straddle');
-      expect(outline.readableElementAt(_chunk + 1)?.id, 'straddle');
-    });
+        expect(elements, hasLength(1));
+        expect(outline.readableElementAt(_chunk - 1)?.id, 'straddle');
+        expect(outline.readableElementAt(_chunk + 1)?.id, 'straddle');
+      },
+    );
 
     test('readableElementAt works in a later chunk', () async {
       final repository = _OutlineRepository(
@@ -326,24 +327,27 @@ void main() {
       expect(outline.readableElementAt(880), isNull);
     });
 
-    test('supports the whole-passage explain action for every readable kind', () async {
-      final repository = _OutlineRepository(build: _richChunk);
-      final outline = _outline(repository);
-      await outline.ensureRange(0, 500);
+    test(
+      'supports the whole-passage explain action for every readable kind',
+      () async {
+        final repository = _OutlineRepository(build: _richChunk);
+        final outline = _outline(repository);
+        await outline.ensureRange(0, 500);
 
-      final kinds = {
-        for (final offset in [50, 150, 220, 320, 420])
-          outline.readableElementAt(offset)!.kind,
-      };
+        final kinds = {
+          for (final offset in [50, 150, 220, 320, 420])
+            outline.readableElementAt(offset)!.kind,
+        };
 
-      expect(kinds, {
-        ReaderElementKind.paragraph,
-        ReaderElementKind.codeBlock,
-        ReaderElementKind.listItem,
-        ReaderElementKind.tableCell,
-        ReaderElementKind.caption,
-      });
-    });
+        expect(kinds, {
+          ReaderElementKind.paragraph,
+          ReaderElementKind.codeBlock,
+          ReaderElementKind.listItem,
+          ReaderElementKind.tableCell,
+          ReaderElementKind.caption,
+        });
+      },
+    );
   });
 
   group('parent hierarchy', () {
@@ -462,17 +466,20 @@ void main() {
       expect(outline.diagnostics.coalescedRequests, 2);
     });
 
-    test('count prefetch hits when the next chunk is already resident', () async {
-      final repository = _OutlineRepository(build: _richChunk);
-      final outline = _outline(repository);
+    test(
+      'count prefetch hits when the next chunk is already resident',
+      () async {
+        final repository = _OutlineRepository(build: _richChunk);
+        final outline = _outline(repository);
 
-      await outline.ensureRange(0, 10);
-      await outline.prefetchAfter(10); // fetches chunk 1
-      await outline.prefetchAfter(10); // already resident
+        await outline.ensureRange(0, 10);
+        await outline.prefetchAfter(10); // fetches chunk 1
+        await outline.prefetchAfter(10); // already resident
 
-      expect(outline.diagnostics.prefetchHits, 1);
-      expect(repository.requests, hasLength(2));
-    });
+        expect(outline.diagnostics.prefetchHits, 1);
+        expect(repository.requests, hasLength(2));
+      },
+    );
 
     test('reset clears counters without touching the cache', () async {
       final repository = _OutlineRepository(build: _richChunk);

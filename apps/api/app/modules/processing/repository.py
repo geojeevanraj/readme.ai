@@ -62,6 +62,15 @@ class ProcessingRepository:
     async def commit(self) -> None:
         await self._session.commit()
 
+    async def rollback(self) -> None:
+        await self._session.rollback()
+
+    async def get_chapter_outline(
+        self, processed_book_id: uuid.UUID
+    ) -> list[tuple[str | None, int]]:
+        """Each chapter's title and start offset, in reading order."""
+        return await self._documents.chapter_outline(processed_book_id)
+
     async def get_document_text(self, processed_book_id: uuid.UUID) -> str | None:
         """The canonical reading text, read directly — no reconstruction."""
         return await self._documents.get_text(processed_book_id)

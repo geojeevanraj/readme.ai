@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, File, Form, Response, UploadFile, status
 
-from app.core.config import Settings, get_settings
+from app.core.errors import PayloadTooLargeError
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.library.dependencies import BookServiceDep
 from app.modules.library.schemas import BookListResponse, BookResponse
@@ -15,14 +14,21 @@ from app.modules.processing.dependencies import ProcessingTriggerDep
 
 router = APIRouter()
 
+# Uploads are read in bounded chunks so an oversized file is rejected as soon as
+# it crosses the limit instead of being loaded into memory in full first.
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
-async def _read_upload_with_limit(file: UploadFile, max_bytes: int) -> bytes:
-    """Read at most *max_bytes + 1* from the upload stream.
 
-    Reading one byte beyond the configured limit lets the downstream service
-    detect oversized payloads without buffering the entire file into memory.
-    """
-    return await file.read(max_bytes + 1)
+async def _read_upload(file: UploadFile, limit: int) -> bytes:
+    buffer = bytearray()
+    while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+        buffer.extend(chunk)
+        if len(buffer) > limit:
+            raise PayloadTooLargeError(
+                "Uploaded file exceeds the maximum allowed size.",
+                details={"max_bytes": limit},
+            )
+    return bytes(buffer)
 
 
 @router.post(
@@ -35,27 +41,32 @@ async def upload_book(
     user: CurrentUser,
     service: BookServiceDep,
     processing: ProcessingTriggerDep,
-    settings: Annotated[Settings, Depends(get_settings)],
     file: UploadFile = File(..., description="The book file to upload."),
     title: str | None = Form(default=None, description="Optional display title."),
 ) -> BookResponse:
     """Upload a book file, create its library record, and begin processing.
 
-    Processing is triggered through the :class:`ProcessingTrigger` seam (inline
-    today, a background worker later) and never fails the upload — processing
-    errors are recorded as the book's processing status.
+    Responds as soon as the file is stored, with the book in ``PROCESSING``;
+    structuring its content runs afterwards through the
+    :class:`ProcessingTrigger` seam and never fails the upload. Clients poll
+    the book until it is ``READY`` (or ``FAILED``).
     """
-    content = await _read_upload_with_limit(file, settings.max_upload_size_bytes)
+    # Plain ids are captured because a rollback inside processing expires the
+    # session's ORM instances (``user`` included).
+    user_id = user.id
+    content = await _read_upload(file, service.max_upload_size_bytes)
     book = await service.upload(
-        user_id=user.id,
+        user_id=user_id,
         filename=file.filename or "book",
         content=content,
         content_type=file.content_type,
         title=title,
     )
-    response = BookResponse.model_validate(book)
-    await processing.schedule(user.id, book.id)
-    return response
+    book_id = book.id
+    await processing.schedule(user_id, book_id)
+    # Re-read so the response reflects the status processing just recorded.
+    book = await service.get_book(user_id, book_id)
+    return BookResponse.model_validate(book)
 
 
 @router.get("", response_model=BookListResponse, summary="List the user's books")
@@ -75,6 +86,30 @@ async def get_book(
     """Return a single book owned by the current user."""
     book = await service.get_book(user.id, book_id)
     return BookResponse.model_validate(book)
+
+
+@router.get(
+    "/{book_id}/cover",
+    response_class=Response,
+    responses={
+        200: {"content": {"image/*": {}}, "description": "The cover image."},
+        404: {"description": "The book is not the caller's or has no cover."},
+    },
+    summary="Get a book's cover image",
+)
+async def get_cover(
+    book_id: uuid.UUID,
+    user: CurrentUser,
+    service: BookServiceDep,
+) -> Response:
+    """Return the cover picture extracted from the book, when it has one."""
+    data, media_type = await service.get_cover(user.id, book_id)
+    # Private: covers are per-user content. Safe to cache briefly on-device.
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.delete(

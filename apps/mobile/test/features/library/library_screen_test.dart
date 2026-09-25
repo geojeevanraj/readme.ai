@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:readme_ai/features/auth/domain/auth_user.dart';
 import 'package:readme_ai/features/library/domain/book.dart';
+import 'package:readme_ai/features/library/domain/book_processing.dart';
 import 'package:readme_ai/features/library/domain/book_status.dart';
 import 'package:readme_ai/features/library/presentation/book_detail_screen.dart';
 import 'package:readme_ai/features/library/presentation/library_screen.dart';
@@ -39,7 +41,14 @@ void main() {
     await pumpApp(tester, authRepository: auth, libraryRepository: library);
 
     expect(find.byType(BookCard), findsOneWidget);
-    expect(find.text('Clean Architecture'), findsOneWidget);
+    // The title is typeset on the generated cover and captioned beneath it.
+    expect(
+      find.descendant(
+        of: find.byType(BookCard),
+        matching: find.text('Clean Architecture'),
+      ),
+      findsWidgets,
+    );
   });
 
   testWidgets('shows the empty state when there are no books', (tester) async {
@@ -56,7 +65,7 @@ void main() {
     expect(find.byType(BookCard), findsNothing);
   });
 
-  testWidgets('shows a loading indicator while the library loads', (
+  testWidgets('shows a loading skeleton while the library loads', (
     tester,
   ) async {
     final auth = FakeAuthRepository(initialUser: _signedIn);
@@ -69,9 +78,12 @@ void main() {
       libraryRepository: library,
       settle: false,
     );
-    await tester.pump(); // one frame; list fetch is still pending
+    // Let auth resolve and route to the library; the list fetch stays pending.
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
-    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    expect(find.byKey(const ValueKey('library-loading')), findsOneWidget);
 
     library.releaseList!.complete();
     await tester.pumpAndSettle();
@@ -102,50 +114,14 @@ void main() {
       filePicker: picker,
     );
     expect(find.byType(BookCard), findsNothing);
+    // An empty library offers upload in place of the floating button.
+    expect(find.byType(FloatingActionButton), findsNothing);
 
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Upload book'));
+    await tester.tap(find.text('Upload book'));
     await tester.pumpAndSettle();
 
     expect(find.byType(BookCard), findsOneWidget);
   });
-
-  testWidgets(
-    'upload shows progress, blocks duplicates, and confirms processing',
-    (tester) async {
-      final auth = FakeAuthRepository(initialUser: _signedIn);
-      addTearDown(auth.dispose);
-      final library = FakeLibraryRepository()
-        ..releaseUpload = Completer<void>();
-      final picker = FakeFilePicker(result: FakeFilePicker.sampleBook());
-
-      await pumpApp(
-        tester,
-        authRepository: auth,
-        libraryRepository: library,
-        filePicker: picker,
-      );
-
-      await tester.tap(
-        find.widgetWithText(FloatingActionButton, 'Upload book'),
-      );
-      await tester.pump();
-
-      expect(find.text('Uploading…'), findsOneWidget);
-      final uploadingButton = tester.widget<FloatingActionButton>(
-        find.byType(FloatingActionButton),
-      );
-      expect(uploadingButton.onPressed, isNull);
-
-      library.releaseUpload!.complete();
-      await tester.pumpAndSettle();
-
-      expect(find.byType(BookCard), findsOneWidget);
-      expect(
-        find.text('sample.pdf uploaded. Processing started.'),
-        findsOneWidget,
-      );
-    },
-  );
 
   testWidgets('failed documents explain recovery and cannot be opened', (
     tester,
@@ -157,15 +133,17 @@ void main() {
     );
 
     await pumpApp(tester, authRepository: auth, libraryRepository: library);
+    // The book grid starts below the day's highlights.
+    await tester.ensureVisible(find.byType(BookCard));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(BookCard));
     await tester.pumpAndSettle();
 
     expect(find.byType(BookDetailScreen), findsOneWidget);
-    expect(find.textContaining('Processing failed'), findsOneWidget);
-    final readButton = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Read'),
-    );
-    expect(readButton.onPressed, isNull);
+    // Without a recorded reason the panel offers a retry, never "Read".
+    expect(find.text('Something went wrong'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
+    expect(find.text('Start reading'), findsNothing);
   });
 
   testWidgets('library remains stable at phone and desktop widths', (
@@ -206,7 +184,9 @@ void main() {
 
     await pumpApp(tester, authRepository: auth, libraryRepository: library);
 
-    // Open the detail screen.
+    // Open the detail screen (the shelf sits below today's card).
+    await tester.ensureVisible(find.byType(BookCard));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(BookCard));
     await tester.pumpAndSettle();
     expect(find.byType(BookDetailScreen), findsOneWidget);
@@ -221,5 +201,107 @@ void main() {
     expect(find.byType(LibraryScreen), findsOneWidget);
     expect(find.byType(BookCard), findsNothing);
     expect(find.text('Your library is empty'), findsOneWidget);
+  });
+
+  testWidgets('shows progress and blocks duplicate uploads while uploading', (
+    tester,
+  ) async {
+    final auth = FakeAuthRepository(initialUser: _signedIn);
+    addTearDown(auth.dispose);
+    // A library with a book shows the floating upload button.
+    final library = FakeLibraryRepository(initial: [_book()])
+      ..releaseUpload = Completer<void>();
+    final picker = FakeFilePicker(result: FakeFilePicker.sampleBook());
+
+    await pumpApp(
+      tester,
+      authRepository: auth,
+      libraryRepository: library,
+      filePicker: picker,
+    );
+
+    await tester.tap(find.widgetWithText(FloatingActionButton, 'Upload book'));
+    await tester.pump();
+
+    final button = find.widgetWithText(FloatingActionButton, 'Uploading…');
+    expect(button, findsOneWidget);
+    expect(tester.widget<FloatingActionButton>(button).onPressed, isNull);
+
+    library.releaseUpload!.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(FloatingActionButton, 'Upload book'), findsOne);
+    expect(find.byType(BookCard), findsNWidgets(2));
+  });
+
+  testWidgets('a rejected upload shows the server\'s reason', (tester) async {
+    final auth = FakeAuthRepository(initialUser: _signedIn);
+    addTearDown(auth.dispose);
+    final options = RequestOptions(path: '/api/v1/books');
+    final library = FakeLibraryRepository()
+      ..uploadError = DioException(
+        requestOptions: options,
+        type: DioExceptionType.badResponse,
+        response: Response<dynamic>(
+          requestOptions: options,
+          statusCode: 413,
+          data: {
+            'error': {
+              'code': 'payload_too_large',
+              'message': 'Uploaded file exceeds the maximum allowed size.',
+            },
+          },
+        ),
+      );
+    final picker = FakeFilePicker(result: FakeFilePicker.sampleBook());
+
+    await pumpApp(
+      tester,
+      authRepository: auth,
+      libraryRepository: library,
+      filePicker: picker,
+    );
+    // An empty library offers upload in place of the floating button.
+    await tester.tap(find.text('Upload book'));
+    await tester.pump();
+
+    expect(
+      find.text('Uploaded file exceeds the maximum allowed size.'),
+      findsOneWidget,
+    );
+    // Drain the snackbar's auto-dismiss timer.
+    await tester.pumpAndSettle(const Duration(seconds: 5));
+  });
+
+  testWidgets('the detail screen of a failed book fits a narrow phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final auth = FakeAuthRepository(initialUser: _signedIn);
+    addTearDown(auth.dispose);
+    final library = FakeLibraryRepository(
+      initial: [_book(status: BookStatus.failed)],
+    );
+    library.processing['b1'] = const BookProcessing(
+      wordCount: 0,
+      error: ProcessingError.emptyDocument,
+    );
+
+    await pumpApp(tester, authRepository: auth, libraryRepository: library);
+    // On a small phone the book grid starts below the day's highlights.
+    await tester.scrollUntilVisible(
+      find.byType(BookCard),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.ensureVisible(find.byType(BookCard));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(BookCard));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('No readable text found'), findsOneWidget);
   });
 }

@@ -115,6 +115,7 @@ class ProcessorBackedParser:
             parser_name=self._metadata.name,
             warnings=warnings,
             canonical_text=structured.text,
+            cover=structured.cover,
         )
 
     def _extract(self, request: ParseRequest) -> StructuredDocument:

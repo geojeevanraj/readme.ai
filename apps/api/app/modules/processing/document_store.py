@@ -357,6 +357,28 @@ class DocumentStore:
             for row in result.all()
         ]
 
+    async def chapter_outline(
+        self, processed_book_id: uuid.UUID
+    ) -> list[tuple[str | None, int]]:
+        """Chapter titles and start offsets, for a table of contents."""
+        result = await self._session.execute(
+            select(StoredDocumentElement.payload, StoredDocumentElement.start_offset)
+            .join(
+                StoredDocument, StoredDocument.id == StoredDocumentElement.document_id
+            )
+            .where(
+                StoredDocument.processed_book_id == processed_book_id,
+                StoredDocumentElement.element_type == ElementType.CHAPTER.value,
+                StoredDocumentElement.start_offset.is_not(None),
+            )
+            .order_by(StoredDocumentElement.sequence)
+        )
+        outline: list[tuple[str | None, int]] = []
+        for payload, start in result.all():
+            title = (payload or {}).get("title")
+            outline.append((title if isinstance(title, str) else None, int(start)))
+        return outline
+
     async def count_overlapping(
         self,
         processed_book_id: uuid.UUID,

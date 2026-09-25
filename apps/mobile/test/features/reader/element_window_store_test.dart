@@ -211,10 +211,7 @@ void main() {
       }
 
       expect(store.residentChunks, ElementWindowStore.defaultCapacity);
-      expect(
-        store.residentElements,
-        ElementWindowStore.defaultCapacity * 250,
-      );
+      expect(store.residentElements, ElementWindowStore.defaultCapacity * 250);
       // Bounded by capacity, not by the 60 chunks visited.
       expect(store.residentElements, lessThan(60 * 250));
     });
@@ -296,18 +293,21 @@ void main() {
       expect(repository.requests, hasLength(2));
     });
 
-    test('one failing chunk does not discard a sibling that succeeded', () async {
-      final repository = _RecordingRepository()..failing.add(_chunk);
-      final store = _store(repository);
+    test(
+      'one failing chunk does not discard a sibling that succeeded',
+      () async {
+        final repository = _RecordingRepository()..failing.add(_chunk);
+        final store = _store(repository);
 
-      await expectLater(
-        store.ensureRange(_chunk - 5, _chunk + 5),
-        throwsStateError,
-      );
+        await expectLater(
+          store.ensureRange(_chunk - 5, _chunk + 5),
+          throwsStateError,
+        );
 
-      expect(store.isReady(0, 10), isTrue);
-      expect(store.isReady(_chunk, _chunk + 5), isFalse);
-    });
+        expect(store.isReady(0, 10), isTrue);
+        expect(store.isReady(_chunk, _chunk + 5), isFalse);
+      },
+    );
 
     test('prefetch failures are swallowed', () async {
       final repository = _RecordingRepository()..failing.add(_chunk);
@@ -344,23 +344,26 @@ void main() {
   });
 
   group('range stitching and determinism', () {
-    test('stitches elements across a chunk boundary in document order', () async {
-      final repository = _RecordingRepository();
-      final store = _store(repository);
+    test(
+      'stitches elements across a chunk boundary in document order',
+      () async {
+        final repository = _RecordingRepository();
+        final store = _store(repository);
 
-      final elements = await store.elementsIn(_chunk - 5, _chunk + 5);
+        final elements = await store.elementsIn(_chunk - 5, _chunk + 5);
 
-      final sequences = elements.map((element) => element.sequence).toList();
-      expect(sequences, sorted(sequences));
-      expect(elements.map((element) => element.id), [
-        'p-0-0',
-        'p-0-1',
-        'p-0-2',
-        'p-$_chunk-0',
-        'p-$_chunk-1',
-        'p-$_chunk-2',
-      ]);
-    });
+        final sequences = elements.map((element) => element.sequence).toList();
+        expect(sequences, sorted(sequences));
+        expect(elements.map((element) => element.id), [
+          'p-0-0',
+          'p-0-1',
+          'p-0-2',
+          'p-$_chunk-0',
+          'p-$_chunk-1',
+          'p-$_chunk-2',
+        ]);
+      },
+    );
 
     test('an element delivered in two chunks appears once', () async {
       final repository = _RecordingRepository();

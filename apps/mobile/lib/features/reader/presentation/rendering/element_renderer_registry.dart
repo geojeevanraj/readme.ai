@@ -25,9 +25,11 @@ import 'renderers/table_placeholder_renderer.dart';
 /// A body-text fallback is always last, so an unrecognised or future element
 /// still renders its characters instead of vanishing.
 class ElementRendererRegistry {
-  ElementRendererRegistry({List<ElementRenderer>? renderers, ElementRenderer? fallback})
-    : _renderers = [...?renderers],
-      _fallback = fallback ?? const BodyTextRenderer();
+  ElementRendererRegistry({
+    List<ElementRenderer>? renderers,
+    ElementRenderer? fallback,
+  }) : _renderers = [...?renderers],
+       _fallback = fallback ?? const BodyTextRenderer();
 
   /// The renderers the Reader ships with, in resolution order.
   factory ElementRendererRegistry.standard() => ElementRendererRegistry(

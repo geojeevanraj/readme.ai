@@ -154,55 +154,60 @@ void main() {
       expect(window.skipped, 0);
     });
 
-    test('required type-specific fields falling back keep the element readable', () {
-      final window = ElementWindowDecoder.decode(
-        _window([
-          // A hyperlink with no target, a formula with no representation, an
-          // image with no identifier, a caption with no target.
-          {
-            'id': 'h',
-            'type': 'hyperlink',
-            'order_index': 0,
-            'sequence': 0,
-            'payload': <String, dynamic>{},
-          },
-          {
-            'id': 'f',
-            'type': 'formula',
-            'order_index': 1,
-            'sequence': 1,
-            'start_offset': 0,
-            'end_offset': 8,
-            'payload': <String, dynamic>{},
-          },
-          {
-            'id': 'img',
-            'type': 'image',
-            'order_index': 2,
-            'sequence': 2,
-            'payload': <String, dynamic>{},
-          },
-          {
-            'id': 'cap',
-            'type': 'caption',
-            'order_index': 3,
-            'sequence': 3,
-            'start_offset': 10,
-            'end_offset': 20,
-            'payload': <String, dynamic>{},
-          },
-        ]),
-      );
+    test(
+      'required type-specific fields falling back keep the element readable',
+      () {
+        final window = ElementWindowDecoder.decode(
+          _window([
+            // A hyperlink with no target, a formula with no representation, an
+            // image with no identifier, a caption with no target.
+            {
+              'id': 'h',
+              'type': 'hyperlink',
+              'order_index': 0,
+              'sequence': 0,
+              'payload': <String, dynamic>{},
+            },
+            {
+              'id': 'f',
+              'type': 'formula',
+              'order_index': 1,
+              'sequence': 1,
+              'start_offset': 0,
+              'end_offset': 8,
+              'payload': <String, dynamic>{},
+            },
+            {
+              'id': 'img',
+              'type': 'image',
+              'order_index': 2,
+              'sequence': 2,
+              'payload': <String, dynamic>{},
+            },
+            {
+              'id': 'cap',
+              'type': 'caption',
+              'order_index': 3,
+              'sequence': 3,
+              'start_offset': 10,
+              'end_offset': 20,
+              'payload': <String, dynamic>{},
+            },
+          ]),
+        );
 
-      expect(window.skipped, 0);
-      expect(window.elements.every((e) => e is UnknownElement), isTrue);
-      // They still reach the page as text rather than disappearing.
-      expect(window.elements.every((e) => e.isReadable), isTrue);
-      expect(
-        window.elements.map((e) => (e as UnknownElement).rawType),
-        ['hyperlink', 'formula', 'image', 'caption'],
-      );
-    });
+        expect(window.skipped, 0);
+        expect(window.elements.every((e) => e is UnknownElement), isTrue);
+        // They still reach the page as text rather than disappearing.
+        expect(window.elements.every((e) => e.isReadable), isTrue);
+        expect(window.elements.map((e) => (e as UnknownElement).rawType), [
+          'hyperlink',
+          'formula',
+          'image',
+          'caption',
+        ]);
+      },
+    );
   });
 
   group('forward compatibility', () {
@@ -349,24 +354,30 @@ void main() {
   });
 
   group('repository and API client', () {
-    test('requests the documented path and range, and decodes the body', () async {
-      final adapter = _StubAdapter(
-        '{"book_id":"b1","start":0,"end":20000,"character_count":200,'
-        '"truncated":false,"elements":[{"id":"p","parent_id":"sec",'
-        '"type":"paragraph","order_index":0,"sequence":3,"start_offset":0,'
-        '"end_offset":30,"page_number":1,"payload":{},"text":null}]}',
-      );
-      final dio = Dio()..httpClientAdapter = adapter;
-      final repository = ReaderRepositoryImpl(dio);
+    test(
+      'requests the documented path and range, and decodes the body',
+      () async {
+        final adapter = _StubAdapter(
+          '{"book_id":"b1","start":0,"end":20000,"character_count":200,'
+          '"truncated":false,"elements":[{"id":"p","parent_id":"sec",'
+          '"type":"paragraph","order_index":0,"sequence":3,"start_offset":0,'
+          '"end_offset":30,"page_number":1,"payload":{},"text":null}]}',
+        );
+        final dio = Dio()..httpClientAdapter = adapter;
+        final repository = ReaderRepositoryImpl(dio);
 
-      final window = await repository.getElements('b1', start: 0, end: 20000);
+        final window = await repository.getElements('b1', start: 0, end: 20000);
 
-      expect(adapter.lastRequest?.path, '/api/v1/books/b1/content/elements');
-      expect(adapter.lastRequest?.queryParameters, {'start': 0, 'end': 20000});
-      expect(adapter.lastRequest?.method, 'GET');
-      expect(window.characterCount, 200);
-      expect(window.elements.single, isA<ParagraphElement>());
-    });
+        expect(adapter.lastRequest?.path, '/api/v1/books/b1/content/elements');
+        expect(adapter.lastRequest?.queryParameters, {
+          'start': 0,
+          'end': 20000,
+        });
+        expect(adapter.lastRequest?.method, 'GET');
+        expect(window.characterCount, 200);
+        expect(window.elements.single, isA<ParagraphElement>());
+      },
+    );
 
     test('a body-less response yields an empty window for the range', () async {
       final dio = Dio()..httpClientAdapter = _StubAdapter('null');
@@ -381,7 +392,10 @@ void main() {
 
     test('transport failures propagate for the caller to degrade', () async {
       final dio = Dio()
-        ..httpClientAdapter = _StubAdapter('{"detail":"nope"}', statusCode: 500);
+        ..httpClientAdapter = _StubAdapter(
+          '{"detail":"nope"}',
+          statusCode: 500,
+        );
       final repository = ReaderRepositoryImpl(dio);
 
       await expectLater(

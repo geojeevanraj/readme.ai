@@ -25,7 +25,9 @@ class HyperlinkRenderer extends KindRenderer {
     final link = element is HyperlinkElement ? element : null;
     final label = (link?.label?.isNotEmpty ?? false)
         ? link!.label!
-        : (block.text.trim().isNotEmpty ? block.text.trim() : link?.target ?? '');
+        : (block.text.trim().isNotEmpty
+              ? block.text.trim()
+              : link?.target ?? '');
     if (label.isEmpty) return const SizedBox.shrink();
 
     final target = link?.target;

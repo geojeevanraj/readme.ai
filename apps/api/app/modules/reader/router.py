@@ -11,20 +11,46 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
+from app.modules.activity.clock import ClientToday
+from app.modules.activity.dependencies import ActivityServiceDep
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.reader.dependencies import ReaderServiceDep
 from app.modules.reader.schemas import (
     BookContentResponse,
     BookmarkListResponse,
     BookmarkResponse,
+    ChapterResponse,
     CreateBookmarkRequest,
     DocumentElementResponse,
     DocumentElementWindowResponse,
     ReadingProgressResponse,
+    RecentReadingListResponse,
     UpdateProgressRequest,
 )
 
 router = APIRouter()
+
+# Mounted under /api/v1/reading: a path such as /api/v1/books/recent would be
+# captured by the library's /api/v1/books/{book_id} route.
+recent_router = APIRouter()
+
+
+@recent_router.get(
+    "/recent",
+    response_model=RecentReadingListResponse,
+    summary="Books the user is reading",
+)
+async def list_recent(
+    user: CurrentUser,
+    service: ReaderServiceDep,
+    limit: int = Query(default=10, ge=1, le=50, description="Maximum items."),
+) -> RecentReadingListResponse:
+    """Return saved reading positions, most recently read first."""
+    progress = await service.list_recent(user.id, limit)
+    return RecentReadingListResponse(
+        items=[ReadingProgressResponse.model_validate(item) for item in progress]
+    )
+
 
 #: Default window span when a client asks for elements without a range. Matches
 #: the client's chunk size, so the common request is one chunk.
@@ -49,6 +75,10 @@ async def get_content(
         format=view.format,
         content=view.text,
         character_count=view.character_count,
+        chapters=[
+            ChapterResponse(title=title, start_offset=start)
+            for title, start in view.chapters
+        ],
     )
 
 
@@ -128,16 +158,25 @@ async def save_progress(
     payload: UpdateProgressRequest,
     user: CurrentUser,
     service: ReaderServiceDep,
+    activity: ActivityServiceDep,
+    today: ClientToday,
 ) -> ReadingProgressResponse:
-    """Create or update the reading position for a book."""
+    """Create or update the reading position for a book.
+
+    The reading time also counts toward today's goal and streak.
+    """
+    # Read before the call: a rollback inside it expires `user`.
+    user_id = user.id
     progress = await service.save_progress(
-        user_id=user.id,
+        user_id=user_id,
         book_id=book_id,
         current_position=payload.current_position,
         progress_percentage=payload.progress_percentage,
         reading_time_seconds=payload.reading_time_seconds,
     )
-    return ReadingProgressResponse.model_validate(progress)
+    response = ReadingProgressResponse.model_validate(progress)
+    await activity.record_reading(user_id, today, payload.reading_time_seconds)
+    return response
 
 
 @router.get(
@@ -167,15 +206,21 @@ async def create_bookmark(
     payload: CreateBookmarkRequest,
     user: CurrentUser,
     service: ReaderServiceDep,
+    activity: ActivityServiceDep,
+    today: ClientToday,
 ) -> BookmarkResponse:
-    """Create a bookmark at a stable position anchor."""
+    """Create a bookmark at a stable position anchor (counts toward tasks)."""
+    # Read before the call: a rollback inside it expires `user`.
+    user_id = user.id
     bookmark = await service.add_bookmark(
-        user_id=user.id,
+        user_id=user_id,
         book_id=book_id,
         anchor=payload.anchor,
         label=payload.label,
     )
-    return BookmarkResponse.model_validate(bookmark)
+    response = BookmarkResponse.model_validate(bookmark)
+    await activity.record_bookmark(user_id, today)
+    return response
 
 
 @router.delete(

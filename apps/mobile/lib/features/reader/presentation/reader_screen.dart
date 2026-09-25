@@ -1,16 +1,22 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/logging/app_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../l10n/generated/app_localizations.dart';
+import '../../activity/application/activity_providers.dart';
+import '../../activity/domain/activity_summary.dart';
 import '../../explanation/presentation/explanation_sheet.dart';
+import '../application/last_opened_book_controller.dart';
 import '../application/reader_controller.dart';
 import '../application/reader_providers.dart';
 import '../application/reader_settings_controller.dart';
 import '../domain/book_content.dart';
 import '../domain/bookmark.dart';
+import '../domain/chapter_mark.dart';
 import '../domain/character_anchor.dart';
 import '../domain/content_format.dart';
 import '../domain/document_outline.dart';
@@ -19,6 +25,7 @@ import '../domain/pagination_source.dart';
 import '../domain/reader_element.dart';
 import 'pagination/document_page.dart';
 import 'pagination/reading_paginator.dart';
+import 'reader_palette.dart';
 import 'rendering/element_renderer.dart';
 import 'rendering/element_renderer_registry.dart';
 import 'rendering/page_body.dart';
@@ -26,8 +33,13 @@ import 'rendering/page_composer.dart';
 import 'rendering/render_block.dart';
 import 'rendering/selection_resolver.dart';
 import 'widgets/bookmarks_sheet.dart';
+import 'widgets/contents_sheet.dart';
 import 'widgets/page_turn_view.dart';
 import 'widgets/reader_settings_sheet.dart';
+
+/// Reading time credited per save is capped (the server does the same), so an
+/// idle open reader can't carry today's goal over the line on its own.
+const int _maxSecondsPerSave = 15 * 60;
 
 /// Immersive, API-backed reader with contextual AI assistance.
 class ReaderScreen extends ConsumerStatefulWidget {
@@ -39,14 +51,27 @@ class ReaderScreen extends ConsumerStatefulWidget {
   ConsumerState<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends ConsumerState<ReaderScreen> {
+class _ReaderScreenState extends ConsumerState<ReaderScreen>
+    with WidgetsBindingObserver {
   /// How many pages ahead of the current one to prepare, so the reader can turn
   /// forward without waiting for measurement.
   static const int _lookahead = 2;
 
-  final Stopwatch _sessionStopwatch = Stopwatch()..start();
+  late final Stopwatch _sessionStopwatch;
   late final ReaderController _readerController;
+  late final AppLogger _logger;
   bool _restored = false;
+
+  /// Whether the saved position has loaded (whether or not there was one).
+  bool _progressLoaded = false;
+
+  /// Whether the position moved since the last save.
+  bool _moved = false;
+
+  // Today's goal: the summary when the book opened, and the time read since.
+  ActivitySummary? _activityAtOpen;
+  int _secondsReadThisSession = 0;
+  bool _celebrated = false;
   double _progress = 0;
   int _characterCount = 0;
   int _currentOffset = 0;
@@ -74,14 +99,43 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void initState() {
     super.initState();
     _readerController = ref.read(readerControllerProvider);
+    _logger = ref.read(loggerProvider);
+    _sessionStopwatch = ref.read(readingStopwatchProvider)();
+    WidgetsBinding.instance.addObserver(this);
+    // Providers can't be modified mid-build; record the visit right after.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(lastOpenedBookProvider.notifier).open(widget.bookId);
+      }
+    });
+    ref.listenManual(activitySummaryProvider, (_, next) {
+      _activityAtOpen ??= next.value;
+    }, fireImmediately: true);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _sessionStopwatch.start();
+      case AppLifecycleState.hidden || AppLifecycleState.paused:
+        // Save on the way out and stop counting time the reader isn't here.
+        if (_sessionStopwatch.isRunning) {
+          _persistPosition();
+          _sessionStopwatch.stop();
+        }
+      case AppLifecycleState.inactive || AppLifecycleState.detached:
+        break;
+    }
   }
 
   @override
   void dispose() {
     // Persistence on teardown is best-effort: if the surrounding scope is
     // already gone, losing the final position must not throw during disposal.
+    WidgetsBinding.instance.removeObserver(this);
     try {
-      _persistPosition();
+      _persistPosition(endSession: true);
     } on Object {
       // Intentionally ignored; the last saved position stands.
     }
@@ -179,21 +233,71 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (mounted && _paginator == paginator) setState(() {});
   }
 
-  void _persistPosition() {
+  /// Save the position and the reading time since the last save.
+  ///
+  /// [endSession] also refreshes today's activity (used when leaving).
+  void _persistPosition({bool endSession = false}) {
     if (_characterCount == 0) return;
-    final fraction = (_currentOffset / _characterCount).clamp(0.0, 1.0);
+    // Leaving before the saved position arrives must not overwrite it with 0.
+    if (!_progressLoaded && !_moved) return;
     final seconds = _sessionStopwatch.elapsed.inSeconds;
-    _sessionStopwatch
-      ..reset()
-      ..start();
+    // Nothing moved and no time passed: not worth a request.
+    if (!_moved && seconds == 0) return;
+    _moved = false;
+    final fraction = (_currentOffset / _characterCount).clamp(0.0, 1.0);
+    // Keeps running (or stopped) as it was; only the lap restarts.
+    _sessionStopwatch.reset();
+    final save = endSession
+        ? _readerController.endSession
+        : _readerController.saveProgress;
     unawaited(
-      _readerController.saveProgress(
+      save(
         widget.bookId,
         currentPosition: _currentOffset.toString(),
         progressPercentage: fraction * 100,
         readingTimeSeconds: seconds,
-      ),
+      ).catchError((Object error) {
+        // Best effort: the next save (or next session) catches up.
+        _logger.warning('Could not save reading progress: $error');
+      }),
     );
+    if (!endSession) _noteReading(seconds);
+  }
+
+  /// Celebrate, once, when this session carries today's goal over the line.
+  void _noteReading(int seconds) {
+    _secondsReadThisSession += math.min(seconds, _maxSecondsPerSave);
+    final before = _activityAtOpen;
+    if (_celebrated || before == null || before.goalMetToday || !mounted) {
+      return;
+    }
+    final goalSeconds = before.dailyGoalMinutes * 60;
+    if (before.todayReadingSeconds + _secondsReadThisSession < goalSeconds) {
+      return;
+    }
+    _celebrated = true;
+    final streak = before.currentStreak + 1;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              // The snackbar is inverted, so use the deeper flame in both themes.
+              const Icon(
+                Icons.local_fire_department_rounded,
+                color: AppColors.flame,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Daily goal reached \u00b7 $streak-day streak. Keep going!',
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
   }
 
   void _restorePosition(String anchor, double percentage) {
@@ -222,6 +326,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final offset = (int.tryParse(anchor) ?? 0).clamp(0, _characterCount);
     _currentOffset = offset;
     _progress = (_currentOffset / _characterCount).clamp(0.0, 1.0);
+    _moved = true;
 
     final paginator = _paginator;
     if (paginator == null) {
@@ -241,6 +346,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (page == null) return;
     setState(() {
       _currentIndex = index;
+      _moved = _moved || page.startOffset != _currentOffset;
       _currentOffset = page.startOffset;
       _progress = _characterCount == 0
           ? 0
@@ -291,10 +397,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
+  void _openContents(List<ChapterMark> chapters) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => ContentsSheet(
+        chapters: chapters,
+        currentOffset: _currentOffset,
+        onSelect: (chapter) {
+          Navigator.of(sheetContext).pop();
+          _jumpToAnchor(chapter.startOffset.toString());
+        },
+      ),
+    );
+  }
+
   void _openSettings() {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (_) => const ReaderSettingsSheet(),
     );
   }
@@ -328,13 +451,18 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     return _composer.compose(page: page, elements: elements);
   }
 
-  RenderContext _renderContext(ThemeData theme, TextStyle textStyle) {
+  RenderContext _renderContext(
+    ThemeData theme,
+    TextStyle textStyle,
+    ReaderPalette palette,
+  ) {
     final colors = theme.colorScheme;
     return RenderContext(
       bodyStyle: textStyle,
+      // Text follows the chosen page tone; accents keep the app's theme.
       colors: RenderPalette(
-        text: colors.onSurface,
-        muted: colors.onSurfaceVariant,
+        text: palette.ink,
+        muted: palette.muted,
         accent: colors.primary,
         surface: colors.surfaceContainerHighest,
         outline: colors.outlineVariant,
@@ -375,8 +503,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final span = element?.span;
     final text = _contentText;
     if (span != null && text != null) {
-      final selected = CharacterAnchor.substring(text, span.start, span.end)
-          .trim();
+      final selected = CharacterAnchor.substring(
+        text,
+        span.start,
+        span.end,
+      ).trim();
       if (selected.isNotEmpty) {
         _explainSelection(selected, span.start, span.end);
         return;
@@ -436,6 +567,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           ],
         ),
         actions: [
+          // A single chapter has nothing to navigate between.
+          if ((contentState.value?.chapters.length ?? 0) > 1)
+            IconButton(
+              tooltip: l10n.contents,
+              icon: const Icon(Icons.toc_rounded),
+              onPressed: () => _openContents(contentState.value!.chapters),
+            ),
           IconButton(
             tooltip: l10n.bookmarkThisPosition,
             icon: const Icon(Icons.bookmark_add_outlined),
@@ -491,6 +629,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     _contentText = content.text;
     _outline ??= ref.read(documentOutlineProvider(widget.bookId));
     final progressAsync = ref.watch(readingProgressProvider(widget.bookId));
+    if (progressAsync.hasValue) _progressLoaded = true;
     final resume = progressAsync.value;
     if (resume != null) {
       _restorePosition(resume.currentPosition, resume.progressPercentage);
@@ -498,13 +637,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
     final settings = ref.watch(readerSettingsProvider);
     final theme = Theme.of(context);
+    final palette = ReaderPalette.resolve(settings.pageTone, theme.brightness);
     final textStyle =
         theme.textTheme.bodyLarge?.copyWith(
+          fontFamily: settings.fontFamily,
           fontSize: settings.fontSize,
           height: settings.lineHeight,
           letterSpacing: 0.05,
+          color: palette.ink,
         ) ??
-        TextStyle(fontSize: settings.fontSize, height: settings.lineHeight);
+        TextStyle(
+          fontFamily: settings.fontFamily,
+          fontSize: settings.fontSize,
+          height: settings.lineHeight,
+          color: palette.ink,
+        );
 
     return LayoutBuilder(
       key: const ValueKey('text-reader'),
@@ -562,11 +709,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   Expanded(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.surface,
+                        color: palette.page,
                         borderRadius: BorderRadius.circular(isWide ? 18 : 10),
-                        border: Border.all(
-                          color: theme.colorScheme.outlineVariant,
-                        ),
+                        border: Border.all(color: palette.hairline),
                         boxShadow: [
                           BoxShadow(
                             color: AppColors.ink.withValues(alpha: 0.10),
@@ -600,6 +745,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                 renderContext: _renderContext(
                                   theme,
                                   textStyle,
+                                  palette,
                                 ),
                                 onExplain: (selected) =>
                                     _explainPageSelection(page, selected),
@@ -614,14 +760,18 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     height: footerHeight,
                     child: Row(
                       children: [
-                        Text(
-                          'Page ${currentPage + 1} of ${paginator.estimatedTotalPages}',
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w700,
+                        Expanded(
+                          child: Text(
+                            'Page ${currentPage + 1} of ${paginator.estimatedTotalPages}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                        const Spacer(),
+                        const SizedBox(width: 12),
                         FilledButton.tonalIcon(
                           onPressed: _explainCurrentPassage,
                           icon: const Icon(
@@ -686,7 +836,7 @@ class _UnsupportedView extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Text-based PDF and plain-text files are supported. '
+                'PDF, EPUB, Markdown and plain-text books are supported. '
                 'Scanned or encrypted files may need OCR or a password first.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,

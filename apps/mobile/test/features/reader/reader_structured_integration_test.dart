@@ -396,14 +396,7 @@ void main() {
       // Open the settings sheet and increase the font size.
       await tester.tap(find.byIcon(Icons.tune_rounded).first);
       await tester.pumpAndSettle();
-      await tester.tap(
-        find
-            .descendant(
-              of: find.byTooltip('Increase Font size'),
-              matching: find.byIcon(Icons.add_rounded),
-            )
-            .first,
-      );
+      await tester.tap(find.byTooltip('Increase Font size').first);
       await tester.pumpAndSettle();
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
